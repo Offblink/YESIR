@@ -144,6 +144,8 @@ class OkSirHandler(BaseHTTPRequestHandler):
                 data["id"],
                 data.get("title") or existing.get("title") or "",
                 existing.get("messages", []),
+                subagents=existing.get("subagents", []),
+                asks=existing.get("asks", []),
             )
             self._send_json({"ok": True})
         elif url.path == "/new":

@@ -94,6 +94,7 @@ async function switchSession(id) {
 function renderMessages(s) {
   msgs.querySelectorAll('.live-node').forEach(n => n.remove());
   let toolBlocks = {};
+  const askQueue = (s.asks || []).slice(); // replayed in order at their ask_user call site
   for (const m of rawMessages) {
     if (m.role === 'user') addDiv('user', marked.parse(m.content || ''));
     else if (m.role === 'assistant') {
@@ -112,6 +113,10 @@ function renderMessages(s) {
         d.innerHTML = '<div class="tool-label">&#x1F527; ' + escapeHtml(tc.function?.name || 'tool') + argsHtml + '</div><div class="tool-result"></div>';
         msgs.appendChild(d);
         if (tc.function?.name === 'spawn') makeSpawnBlockClickable(d, tc.id);
+        if (tc.function?.name === 'ask_user') {
+          const rec = askQueue.shift();
+          if (rec) msgs.appendChild(buildAnsweredAskCard(rec));
+        }
         toolBlocks[tc.id] = d;
       });
     } else if (m.role === 'tool') {
@@ -120,7 +125,7 @@ function renderMessages(s) {
       else addDiv('tool', '<pre>' + escapeHtml(m.content || '') + '</pre>');
     }
   }
-  (s.asks || []).forEach(renderArchivedAsk);
+  askQueue.forEach(renderArchivedAsk); // leftovers (e.g. turn died mid-ask)
   if (turn && turn.sessionId === currentSessionId) renderTurnLive();
 }
 async function newSession() {
