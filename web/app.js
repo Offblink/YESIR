@@ -92,6 +92,7 @@ async function switchSession(id) {
 }
 
 function renderMessages(s) {
+  msgs.querySelectorAll('.live-node').forEach(n => n.remove());
   let toolBlocks = {};
   for (const m of rawMessages) {
     if (m.role === 'user') addDiv('user', marked.parse(m.content || ''));
@@ -329,10 +330,10 @@ async function send() {
     } catch (e) {}
   }
   const sid = currentSessionId;
-  turn = { sessionId: sid, buffer: '', reasoning: '', reasoningOpen: false, tools: [], asks: [], errors: [] };
+  turn = { sessionId: sid, entries: [] }; // chronological: reasoning/text/tool/ask/error
   rawMessages.push({ role: 'user', content: text });
   sessionDirty = true;
-  addDiv('user', marked.parse(text));
+  turn.userText = text;
   input.value = ''; btn.disabled = true; status.textContent = 'Thinking...';
   renderTurnLive();
   try {
@@ -372,28 +373,37 @@ function handleTurnEvent(obj) {
   if (!t) return;
   const visible = currentSessionId === t.sessionId;
   switch (obj.type) {
-    case 'text':
-      t.buffer += obj.content; status.textContent = 'Writing...';
-      if (visible) { const ad = document.getElementById('assistant-msg'); if (ad) ad.innerHTML = marked.parse(t.buffer); }
+    case 'text': {
+      const last = t.entries[t.entries.length - 1];
+      if (last && last.kind === 'text') last.content += obj.content;
+      else t.entries.push({ kind: 'text', content: obj.content });
+      status.textContent = 'Writing...';
+      if (visible) updateLastText();
       break;
+    }
     case 'reasoning_start':
-      t.reasoning = ''; t.reasoningOpen = true;
+      t.entries.push({ kind: 'reasoning', content: '', closed: false });
       if (visible) renderTurnLive();
       break;
-    case 'reasoning':
-      t.reasoning += obj.content;
-      if (visible) { const rc = document.getElementById('reasoning-content'); if (rc) { rc.textContent = t.reasoning; rc.scrollTop = rc.scrollHeight; const d = document.getElementById('reasoning-details'); if (d) d.open = true; } }
+    case 'reasoning': {
+      const last = t.entries[t.entries.length - 1];
+      if (last && last.kind === 'reasoning') last.content += obj.content;
+      if (visible) updateLastReasoning();
       break;
-    case 'reasoning_end':
-      t.reasoningOpen = false;
-      if (visible) { const d = document.getElementById('reasoning-details'); if (d) d.open = false; }
+    }
+    case 'reasoning_end': {
+      const idx = t.entries.map(x => x.kind).lastIndexOf('reasoning');
+      if (idx >= 0) t.entries[idx].closed = true;
+      if (visible) { const d = document.getElementById('live-details-' + idx); if (d) d.open = false; }
       break;
+    }
     case 'tool':
-      t.tools.push({ id: obj.content.id, name: obj.content.name, args: obj.content.args, result: '' });
+      t.entries.push({ kind: 'tool', id: obj.content.id, name: obj.content.name, args: obj.content.args, result: '' });
       if (visible) renderTurnLive();
       break;
     case 'tool_result': {
-      const rec = t.tools.find(x => x.id === obj.content.id) || t.tools.filter(x => !x.result).pop();
+      const rec = t.entries.find(x => x.kind === 'tool' && x.id === obj.content.id)
+        || [...t.entries].reverse().find(x => x.kind === 'tool' && !x.result);
       if (rec) rec.result = obj.content.content;
       if (visible) { const block = document.getElementById('tool-' + obj.content.id); if (block) block.querySelector('.tool-result').innerHTML = '<pre>' + escapeHtml(obj.content.content) + '</pre>'; else renderTurnLive(); }
       break;
@@ -414,13 +424,13 @@ function handleTurnEvent(obj) {
       break;
     }
     case 'ask':
-      t.asks.forEach(a => a.active = false);
-      t.asks.push({ id: obj.content.id, questions: obj.content.questions || [], answers: null, active: true });
+      t.entries.filter(x => x.kind === 'ask').forEach(a => a.active = false);
+      t.entries.push({ kind: 'ask', id: obj.content.id, questions: obj.content.questions || [], answers: null, active: true });
       if (visible) renderTurnLive();
       break;
     case 'error':
-      t.errors.push(obj.content);
-      if (visible) addDiv('error', '&#x26A0; ' + escapeHtml(obj.content));
+      t.entries.push({ kind: 'error', content: obj.content });
+      if (visible) renderTurnLive();
       break;
     case 'sessionId':
       if (!t.sessionId) t.sessionId = obj.content;
@@ -436,40 +446,62 @@ function handleTurnEvent(obj) {
   if (visible && currentSessionId === t.sessionId) { if (isNearBottom(msgs)) msgs.scrollTop = msgs.scrollHeight; updateScrollBtn(); }
 }
 
+function updateLastText() {
+  const t = turn;
+  const idx = t.entries.map(x => x.kind).lastIndexOf('text');
+  if (idx < 0) return renderTurnLive();
+  const el = document.getElementById('live-text-' + idx);
+  if (el) { el.innerHTML = marked.parse(t.entries[idx].content); if (isNearBottom(msgs)) msgs.scrollTop = msgs.scrollHeight; }
+  else renderTurnLive();
+}
+
+function updateLastReasoning() {
+  const t = turn;
+  const idx = t.entries.map(x => x.kind).lastIndexOf('reasoning');
+  if (idx < 0) return;
+  const el = document.getElementById('live-reasoning-' + idx);
+  if (el) { el.textContent = t.entries[idx].content; el.scrollTop = el.scrollHeight; const d = document.getElementById('live-details-' + idx); if (d) d.open = true; }
+  else renderTurnLive();
+}
+
 function renderTurnLive() {
   if (!turn || turn.sessionId !== currentSessionId) return;
   const saved = saveAskCardState();
   msgs.querySelectorAll('.live-node').forEach(n => n.remove());
-  const t = turn;
-  if (t.reasoning) {
-    const det = document.createElement('details');
-    det.className = 'msg reasoning live-node'; det.id = 'reasoning-details'; det.open = !!t.reasoningOpen;
-    det.innerHTML = '<summary>Thinking\u2026</summary><div id="reasoning-content"></div>';
-    det.querySelector('#reasoning-content').textContent = t.reasoning;
-    msgs.appendChild(det);
+  if (turn.userText) {
+    const u = document.createElement('div');
+    u.className = 'msg user live-node';
+    u.innerHTML = marked.parse(turn.userText);
+    msgs.appendChild(u);
   }
-  for (const rec of t.tools) {
-    const d = document.createElement('div');
-    d.className = 'msg tool live-node'; d.id = 'tool-' + rec.id;
-    const args = rec.args;
-    const argsHtml = args ? ' <code style="font-size:0.82rem;opacity:0.7">' + escapeHtml(args.length > 80 ? args.slice(0, 80) + '...' : args) + '</code>' : '';
-    d.innerHTML = '<div class="tool-label">&#x1F527; ' + escapeHtml(rec.name) + argsHtml + '</div><div class="tool-result">' + (rec.result ? '<pre>' + escapeHtml(rec.result) + '</pre>' : '') + '</div>';
-    msgs.appendChild(d);
-    if (rec.name === 'spawn') makeSpawnBlockClickable(d, rec.id);
-  }
-  for (const a of t.asks) {
-    msgs.appendChild(a.active ? buildActiveAskCard(a, saved) : buildAnsweredAskCard(a));
-  }
-  if (t.errors.length) {
-    const d = document.createElement('div');
-    d.className = 'msg error live-node';
-    d.innerHTML = t.errors.map(e => '&#x26A0; ' + escapeHtml(e)).join('<br>');
-    msgs.appendChild(d);
-  }
-  const ad = document.createElement('div');
-  ad.className = 'msg assistant live-node'; ad.id = 'assistant-msg';
-  if (t.buffer) ad.innerHTML = marked.parse(t.buffer);
-  msgs.appendChild(ad);
+  turn.entries.forEach((e, i) => {
+    if (e.kind === 'reasoning') {
+      const det = document.createElement('details');
+      det.className = 'msg reasoning live-node'; det.id = 'live-details-' + i; det.open = !e.closed;
+      det.innerHTML = '<summary>Thinking\u2026</summary><div id="live-reasoning-' + i + '"></div>';
+      det.querySelector('#live-reasoning-' + i).textContent = e.content;
+      msgs.appendChild(det);
+    } else if (e.kind === 'text') {
+      const ad = document.createElement('div');
+      ad.className = 'msg assistant live-node'; ad.id = 'live-text-' + i;
+      ad.innerHTML = marked.parse(e.content);
+      msgs.appendChild(ad);
+    } else if (e.kind === 'tool') {
+      const d = document.createElement('div');
+      d.className = 'msg tool live-node'; d.id = 'tool-' + e.id;
+      const argsHtml = e.args ? ' <code style="font-size:0.82rem;opacity:0.7">' + escapeHtml(e.args.length > 80 ? e.args.slice(0, 80) + '...' : e.args) + '</code>' : '';
+      d.innerHTML = '<div class="tool-label">&#x1F527; ' + escapeHtml(e.name) + argsHtml + '</div><div class="tool-result">' + (e.result ? '<pre>' + escapeHtml(e.result) + '</pre>' : '') + '</div>';
+      msgs.appendChild(d);
+      if (e.name === 'spawn') makeSpawnBlockClickable(d, e.id);
+    } else if (e.kind === 'ask') {
+      msgs.appendChild(e.active ? buildActiveAskCard(e, saved) : buildAnsweredAskCard(e));
+    } else if (e.kind === 'error') {
+      const d = document.createElement('div');
+      d.className = 'msg error live-node';
+      d.innerHTML = '&#x26A0; ' + escapeHtml(e.content);
+      msgs.appendChild(d);
+    }
+  });
   msgs.scrollTop = msgs.scrollHeight;
 }
 input.addEventListener('keydown', e => {
@@ -572,7 +604,7 @@ function collectAskAnswers(card) {
     if (!v) { if (inp) { inp.focus(); inp.placeholder = 'Required'; } return; }
     vals.push(v);
   }
-  const rec = (turn && turn.asks || []).find(x => x.id === card._askId);
+  const rec = (turn && turn.entries || []).find(x => x.kind === 'ask' && x.id === card._askId);
   if (rec) { rec.answers = vals; rec.active = false; }
   card.replaceWith(buildAnsweredAskCard({ questions: qs, answers: vals, status: 'answered' }));
   fetch('/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' },
