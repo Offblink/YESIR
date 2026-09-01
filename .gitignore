@@ -1,0 +1,7 @@
+config.json
+sessions/
+*.tmp
+*.log
+__pycache__/
+.pytest_cache/
+.ruff_cache/
