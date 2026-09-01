@@ -399,6 +399,7 @@ input.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   if (e.key === 'Escape' && abortCtrl) { abortCtrl.abort(); abortCtrl = null; }
 });
+btn.addEventListener("click", send);
 document.getElementById('btn-browse').addEventListener('click', async () => {
   try {
     const r = await fetch('/pickfile', { method: 'POST' });
