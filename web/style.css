@@ -119,6 +119,11 @@ html,body{font-family:var(--font);font-size:14.5px;line-height:1.6;color:var(--t
 .msg.tool.spawn-block:hover{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
 .msg.tool.spawn-block .tool-label::after{content:" \u2197 click";font-size:0.68rem;color:var(--dim);text-transform:none;letter-spacing:0}
 .msg.ask-card{align-self:flex-start;background:#fffbeb;border:1px solid #fde68a;max-width:86%;box-shadow:0 2px 12px rgba(0,0,0,0.06)}
+.ask-block{padding:0.9rem 0}
+.ask-block + .ask-block{border-top:1px dashed #e7d3a1;margin-top:0.4rem}
+.ask-card.answered .ask-block{padding:0.7rem 0}
+.ask-card.answered .ask-option.selected{cursor:default}
+.ask-card.answered .ask-options{gap:0.4rem;opacity:0.85}
 .ask-q{font-weight:600;color:var(--text);margin-bottom:0.6rem}
 .ask-options{display:flex;flex-direction:column;gap:0.5rem}
 .ask-option{text-align:left;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.55rem 0.9rem;cursor:pointer;font-family:var(--font);font-size:0.84rem;color:var(--text);transition:all 0.2s}

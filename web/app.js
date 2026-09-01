@@ -52,6 +52,8 @@ async function reloadSessionFromServer() {
     if (!r.ok) return;
     const s = await r.json();
     rawMessages = s.messages || [];
+    registerArchived(s.subagents);
+    renderMessages(s);
     loadSessions();
   } catch (e) {}
 }
@@ -84,36 +86,41 @@ async function switchSession(id) {
     msgs.innerHTML = '';
     tray.innerHTML = '';
     registerArchived(s.subagents);
-    let toolBlocks = {};
-    for (const m of rawMessages) {
-      if (m.role === 'user') addDiv('user', marked.parse(m.content || ''));
-      else if (m.role === 'assistant') {
-        if (m.reasoning) {
-          const det = document.createElement('details');
-          det.className = 'msg reasoning';
-          det.innerHTML = '<summary>Thinking\u2026</summary><div style="white-space:pre-wrap;max-height:200px;overflow-y:auto">' + escapeHtml(m.reasoning) + '</div>';
-          msgs.appendChild(det);
-        }
-        if (m.content) addDiv('assistant', marked.parse(m.content));
-        if (m.tool_calls) m.tool_calls.forEach(tc => {
-          const d = document.createElement('div');
-          d.className = 'msg tool'; d.id = 'tool-' + tc.id;
-          const args = tc.function?.arguments || '';
-          const argsHtml = args ? ' <code style="font-size:0.82rem;opacity:0.7">' + escapeHtml(args.length > 80 ? args.slice(0, 80) + '...' : args) + '</code>' : '';
-          d.innerHTML = '<div class="tool-label">&#x1F527; ' + escapeHtml(tc.function?.name || 'tool') + argsHtml + '</div><div class="tool-result"></div>';
-          msgs.appendChild(d);
-          if (tc.function?.name === 'spawn') makeSpawnBlockClickable(d, tc.id);
-          toolBlocks[tc.id] = d;
-        });
-      } else if (m.role === 'tool') {
-        const block = toolBlocks[m.tool_call_id];
-        if (block) block.querySelector('.tool-result').innerHTML = '<pre>' + escapeHtml(m.content || '') + '</pre>';
-        else addDiv('tool', '<pre>' + escapeHtml(m.content || '') + '</pre>');
-      }
-    }
-    (s.asks || []).forEach(renderArchivedAsk);
+    renderMessages(s);
     renderSessionList(); loadSessions();
   } catch (e) { console.error('switchSession:', e); }
+}
+
+function renderMessages(s) {
+  let toolBlocks = {};
+  for (const m of rawMessages) {
+    if (m.role === 'user') addDiv('user', marked.parse(m.content || ''));
+    else if (m.role === 'assistant') {
+      if (m.reasoning) {
+        const det = document.createElement('details');
+        det.className = 'msg reasoning';
+        det.innerHTML = '<summary>Thinking\u2026</summary><div style="white-space:pre-wrap;max-height:200px;overflow-y:auto">' + escapeHtml(m.reasoning) + '</div>';
+        msgs.appendChild(det);
+      }
+      if (m.content) addDiv('assistant', marked.parse(m.content));
+      if (m.tool_calls) m.tool_calls.forEach(tc => {
+        const d = document.createElement('div');
+        d.className = 'msg tool'; d.id = 'tool-' + tc.id;
+        const args = tc.function?.arguments || '';
+        const argsHtml = args ? ' <code style="font-size:0.82rem;opacity:0.7">' + escapeHtml(args.length > 80 ? args.slice(0, 80) + '...' : args) + '</code>' : '';
+        d.innerHTML = '<div class="tool-label">&#x1F527; ' + escapeHtml(tc.function?.name || 'tool') + argsHtml + '</div><div class="tool-result"></div>';
+        msgs.appendChild(d);
+        if (tc.function?.name === 'spawn') makeSpawnBlockClickable(d, tc.id);
+        toolBlocks[tc.id] = d;
+      });
+    } else if (m.role === 'tool') {
+      const block = toolBlocks[m.tool_call_id];
+      if (block) block.querySelector('.tool-result').innerHTML = '<pre>' + escapeHtml(m.content || '') + '</pre>';
+      else addDiv('tool', '<pre>' + escapeHtml(m.content || '') + '</pre>');
+    }
+  }
+  (s.asks || []).forEach(renderArchivedAsk);
+  if (turn && turn.sessionId === currentSessionId) renderTurnLive();
 }
 async function newSession() {
   await closeCurrentSession();
@@ -307,6 +314,8 @@ function registerArchived(subs) {
 
 /* ---------- send / stream ---------- */
 let abortCtrl = null;
+let turn = null; // active turn: {sessionId, buffer, reasoning, reasoningOpen, tools, asks, errors}
+
 async function send() {
   const text = input.value.trim();
   if (!text || processing) return;
@@ -319,16 +328,17 @@ async function send() {
       currentSessionId = id; loadSessions();
     } catch (e) {}
   }
+  const sid = currentSessionId;
+  turn = { sessionId: sid, buffer: '', reasoning: '', reasoningOpen: false, tools: [], asks: [], errors: [] };
   rawMessages.push({ role: 'user', content: text });
   sessionDirty = true;
   addDiv('user', marked.parse(text));
-  input.value = ''; btn.disabled = true; status.textContent = '';
-  const ad = addDiv('assistant', '', 'assistant-msg');
-  let buffer = '';
+  input.value = ''; btn.disabled = true; status.textContent = 'Thinking...';
+  renderTurnLive();
   try {
     const resp = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, sessionId: currentSessionId }), signal: abortCtrl.signal });
-    if (!resp.ok) { status.textContent = 'Error: ' + resp.status; processing = false; btn.disabled = false; return; }
+      body: JSON.stringify({ message: text, sessionId: sid }), signal: abortCtrl.signal });
+    if (!resp.ok) { status.textContent = 'Error: ' + resp.status; turn = null; processing = false; btn.disabled = false; return; }
     const reader = resp.body.getReader();
     const dec = new TextDecoder();
     let leftover = '';
@@ -342,85 +352,125 @@ async function send() {
         if (!line) continue;
         let obj;
         try { obj = JSON.parse(line); } catch (e) { continue; }
-        switch (obj.type) {
-          case 'text': buffer += obj.content; ad.innerHTML = marked.parse(buffer); status.textContent = 'Writing...'; break;
-          case 'reasoning_start': {
-            const old = document.getElementById('reasoning-details');
-            if (old) old.remove();
-            const det = document.createElement('details');
-            det.id = 'reasoning-details'; det.className = 'msg reasoning';
-            det.innerHTML = '<summary>Thinking\u2026</summary><div id="reasoning-content"></div>';
-            msgs.insertBefore(det, ad);
-            break;
-          }
-          case 'reasoning': {
-            const rc = document.getElementById('reasoning-content');
-            if (rc) {
-              rc.textContent += obj.content; rc.scrollTop = rc.scrollHeight;
-              const d2 = document.getElementById('reasoning-details');
-              if (d2) d2.open = true;
-            }
-            break;
-          }
-          case 'tool': {
-            const d = document.createElement('div');
-            d.className = 'msg tool'; d.id = 'tool-' + obj.content.id;
-            const args = obj.content.args;
-            const argsHtml = args ? ' <code style="font-size:0.82rem;opacity:0.7">' + escapeHtml(args.length > 80 ? args.slice(0, 80) + '...' : args) + '</code>' : '';
-            d.innerHTML = '<div class="tool-label">&#x1F527; ' + escapeHtml(obj.content.name) + argsHtml + '</div><div class="tool-result"></div>';
-            msgs.insertBefore(d, ad);
-            if (obj.content.name === 'spawn') makeSpawnBlockClickable(d, obj.content.id);
-            break;
-          }
-          case 'tool_result': {
-            const tid = obj.content.id;
-            let block = document.getElementById('tool-' + tid);
-            if (!block) {
-              const tools = msgs.querySelectorAll('.msg.tool');
-              for (let i = tools.length - 1; i >= 0; i--) {
-                const rd = tools[i].querySelector('.tool-result');
-                if (rd && !rd.innerHTML) { block = tools[i]; break; }
-              }
-            }
-            if (block) block.querySelector('.tool-result').innerHTML = '<pre>' + escapeHtml(obj.content.content) + '</pre>';
-            else {
-              const d = document.createElement('div');
-              d.className = 'msg tool';
-              d.innerHTML = '<pre>' + escapeHtml(obj.content.content) + '</pre>';
-              msgs.insertBefore(d, ad);
-            }
-            break;
-          }
-          case 'agent_spawn': {
-            agents[obj.content.id] = {
-              layer: obj.content.layer, goal: obj.content.goal,
-              replyFormat: obj.content.reply_format || '', status: 'running', history: [],
-            };
-            if (obj.content.call_id) specByCall[obj.content.call_id] = obj.content.id;
-            agentBubble(obj.content.id);
-            break;
-          }
-          case 'agent_status': setAgentStatus(obj.content.id, obj.content.status); break;
-          case 'agent_event': {
-            const aid = obj.content.id, ev = obj.content.event;
-            if (agents[aid]) agents[aid].history.push(ev);
-            agentEvent(aid, ev);
-            break;
-          }
-          case 'ask': handleAsk(obj.content); break;
-          case 'error': addDiv('error', '&#x26A0; ' + escapeHtml(obj.content)); break;
-          case 'sessionId': currentSessionId = obj.content; break;
-          case 'done': ad.innerHTML = marked.parse(buffer); status.textContent = ''; reloadSessionFromServer(); break;
-        }
-        if (isNearBottom(msgs)) msgs.scrollTop = msgs.scrollHeight;
-        updateScrollBtn();
+        handleTurnEvent(obj);
       }
     }
   } catch (e) {
     if (e.name === 'AbortError') status.textContent = 'Aborted.';
     else status.textContent = 'Error: ' + e.message;
+    turn = null;
   }
-  processing = false; btn.disabled = false; input.focus();
+  processing = false; btn.disabled = false;
+  if (currentSessionId === sid) input.focus();
+}
+
+/* Turn events update the model first, then touch the DOM only when the
+   turn's session is on screen — switching sessions mid-turn keeps the turn
+   running in the background (no detached-node errors). */
+function handleTurnEvent(obj) {
+  const t = turn;
+  if (!t) return;
+  const visible = currentSessionId === t.sessionId;
+  switch (obj.type) {
+    case 'text':
+      t.buffer += obj.content; status.textContent = 'Writing...';
+      if (visible) { const ad = document.getElementById('assistant-msg'); if (ad) ad.innerHTML = marked.parse(t.buffer); }
+      break;
+    case 'reasoning_start':
+      t.reasoning = ''; t.reasoningOpen = true;
+      if (visible) renderTurnLive();
+      break;
+    case 'reasoning':
+      t.reasoning += obj.content;
+      if (visible) { const rc = document.getElementById('reasoning-content'); if (rc) { rc.textContent = t.reasoning; rc.scrollTop = rc.scrollHeight; const d = document.getElementById('reasoning-details'); if (d) d.open = true; } }
+      break;
+    case 'reasoning_end':
+      t.reasoningOpen = false;
+      if (visible) { const d = document.getElementById('reasoning-details'); if (d) d.open = false; }
+      break;
+    case 'tool':
+      t.tools.push({ id: obj.content.id, name: obj.content.name, args: obj.content.args, result: '' });
+      if (visible) renderTurnLive();
+      break;
+    case 'tool_result': {
+      const rec = t.tools.find(x => x.id === obj.content.id) || t.tools.filter(x => !x.result).pop();
+      if (rec) rec.result = obj.content.content;
+      if (visible) { const block = document.getElementById('tool-' + obj.content.id); if (block) block.querySelector('.tool-result').innerHTML = '<pre>' + escapeHtml(obj.content.content) + '</pre>'; else renderTurnLive(); }
+      break;
+    }
+    case 'agent_spawn':
+      agents[obj.content.id] = {
+        layer: obj.content.layer, goal: obj.content.goal,
+        replyFormat: obj.content.reply_format || '', status: 'running', history: [],
+      };
+      if (obj.content.call_id) specByCall[obj.content.call_id] = obj.content.id;
+      agentBubble(obj.content.id);
+      break;
+    case 'agent_status': setAgentStatus(obj.content.id, obj.content.status); break;
+    case 'agent_event': {
+      const aid = obj.content.id, ev = obj.content.event;
+      if (agents[aid]) agents[aid].history.push(ev);
+      agentEvent(aid, ev);
+      break;
+    }
+    case 'ask':
+      t.asks.forEach(a => a.active = false);
+      t.asks.push({ id: obj.content.id, questions: obj.content.questions || [], answers: null, active: true });
+      if (visible) renderTurnLive();
+      break;
+    case 'error':
+      t.errors.push(obj.content);
+      if (visible) addDiv('error', '&#x26A0; ' + escapeHtml(obj.content));
+      break;
+    case 'sessionId':
+      if (!t.sessionId) t.sessionId = obj.content;
+      break;
+    case 'done': {
+      const viewing = currentSessionId === t.sessionId;
+      turn = null;
+      status.textContent = '';
+      if (viewing) reloadSessionFromServer();
+      break;
+    }
+  }
+  if (visible && currentSessionId === t.sessionId) { if (isNearBottom(msgs)) msgs.scrollTop = msgs.scrollHeight; updateScrollBtn(); }
+}
+
+function renderTurnLive() {
+  if (!turn || turn.sessionId !== currentSessionId) return;
+  const saved = saveAskCardState();
+  msgs.querySelectorAll('.live-node').forEach(n => n.remove());
+  const t = turn;
+  if (t.reasoning) {
+    const det = document.createElement('details');
+    det.className = 'msg reasoning live-node'; det.id = 'reasoning-details'; det.open = !!t.reasoningOpen;
+    det.innerHTML = '<summary>Thinking\u2026</summary><div id="reasoning-content"></div>';
+    det.querySelector('#reasoning-content').textContent = t.reasoning;
+    msgs.appendChild(det);
+  }
+  for (const rec of t.tools) {
+    const d = document.createElement('div');
+    d.className = 'msg tool live-node'; d.id = 'tool-' + rec.id;
+    const args = rec.args;
+    const argsHtml = args ? ' <code style="font-size:0.82rem;opacity:0.7">' + escapeHtml(args.length > 80 ? args.slice(0, 80) + '...' : args) + '</code>' : '';
+    d.innerHTML = '<div class="tool-label">&#x1F527; ' + escapeHtml(rec.name) + argsHtml + '</div><div class="tool-result">' + (rec.result ? '<pre>' + escapeHtml(rec.result) + '</pre>' : '') + '</div>';
+    msgs.appendChild(d);
+    if (rec.name === 'spawn') makeSpawnBlockClickable(d, rec.id);
+  }
+  for (const a of t.asks) {
+    msgs.appendChild(a.active ? buildActiveAskCard(a, saved) : buildAnsweredAskCard(a));
+  }
+  if (t.errors.length) {
+    const d = document.createElement('div');
+    d.className = 'msg error live-node';
+    d.innerHTML = t.errors.map(e => '&#x26A0; ' + escapeHtml(e)).join('<br>');
+    msgs.appendChild(d);
+  }
+  const ad = document.createElement('div');
+  ad.className = 'msg assistant live-node'; ad.id = 'assistant-msg';
+  if (t.buffer) ad.innerHTML = marked.parse(t.buffer);
+  msgs.appendChild(ad);
+  msgs.scrollTop = msgs.scrollHeight;
 }
 input.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -438,28 +488,39 @@ fetch('/model').then(r => r.json()).then(d => { document.getElementById('model-n
 loadSessions();
 
 /* ---------- ask card (Inquire) ---------- */
-function handleAsk(content) {
-  const existing = document.getElementById('ask-card');
-  if (existing) existing.remove();
-  const card = document.createElement('div');
-  card.className = 'msg ask-card'; card.id = 'ask-card';
-  const qs = content.questions || [];
-  card._askId = content.id; card._askQuestions = qs;
-  let html = '';
-  qs.forEach((q, qi) => {
-    const opts = (q.options || []).map(o =>
-      '<button type="button" class="ask-option" data-q="' + qi + '"><b>' + escapeHtml(o.label) + '</b>'
-      + (o.description ? '<br><span class="ask-desc">' + escapeHtml(o.description) + '</span>' : '') + '</button>').join('');
-    html += '<div class="ask-q">\u2753 ' + escapeHtml(q.question) + '</div>'
-      + '<div class="ask-options">' + opts + '</div>'
-      + ((!opts || q.allow_custom !== false)
-        ? '<input class="ask-input" data-q="' + qi + '" placeholder="' + (opts ? 'Or type your own...' : 'Your answer...') + '">'
-        : '');
+function saveAskCardState() {
+  const card = document.getElementById('ask-card');
+  if (!card) return null;
+  return (card._askQuestions || []).map((q, qi) => {
+    const sel = card.querySelector('.ask-option.selected[data-q="' + qi + '"]');
+    const inp = card.querySelector('.ask-input[data-q="' + qi + '"]');
+    return { sel: sel ? sel.querySelector('b').textContent : null, val: inp ? inp.value : '' };
   });
-  html += '<div class="ask-actions"><button id="ask-submit">Submit</button></div>';
-  card.innerHTML = html;
-  msgs.insertBefore(card, document.getElementById('assistant-msg') || null);
-  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function askQuestionHtml(q, qi) {
+  const opts = (q.options || []).map(o =>
+    '<button type="button" class="ask-option" data-q="' + qi + '"><b>' + escapeHtml(o.label) + '</b>'
+    + (o.description ? '<br><span class="ask-desc">' + escapeHtml(o.description) + '</span>' : '') + '</button>').join('');
+  return '<div class="ask-q">\u2753 ' + escapeHtml(q.question) + '</div>'
+    + '<div class="ask-options">' + opts + '</div>'
+    + (((q.options || []).length === 0 || q.allow_custom !== false)
+      ? '<input class="ask-input" data-q="' + qi + '" placeholder="' + ((q.options || []).length ? 'Or type your own...' : 'Your answer...') + '">'
+      : '');
+}
+
+function buildActiveAskCard(a, saved) {
+  const card = document.createElement('div');
+  card.className = 'msg ask-card live-node'; card.id = 'ask-card';
+  card._askId = a.id; card._askQuestions = a.questions;
+  card.innerHTML = a.questions.map((q, qi) => '<div class="ask-block">' + askQuestionHtml(q, qi) + '</div>').join('')
+    + '<div class="ask-actions"><button id="ask-submit">Submit</button></div>';
+  (saved || []).forEach((s, qi) => {
+    if (s.sel) card.querySelectorAll('.ask-option[data-q="' + qi + '"]').forEach(b => {
+      if (b.querySelector('b').textContent === s.sel) b.classList.add('selected');
+    });
+    if (s.val) { const inp = card.querySelector('.ask-input[data-q="' + qi + '"]'); if (inp) inp.value = s.val; }
+  });
   card.querySelectorAll('.ask-option').forEach(btn => {
     btn.addEventListener('click', () => {
       const qi = btn.dataset.q;
@@ -477,7 +538,30 @@ function handleAsk(content) {
     inp.addEventListener('keydown', e => { if (e.key === 'Enter') collectAskAnswers(card); });
   });
   card.querySelector('#ask-submit').addEventListener('click', () => collectAskAnswers(card));
+  return card;
 }
+
+function buildAnsweredAskCard(rec) {
+  const card = document.createElement('div');
+  card.className = 'msg ask-card answered';
+  const qs = rec.questions || [];
+  const ans = Array.isArray(rec.answers) ? rec.answers : (rec.answers != null ? [rec.answers] : null);
+  card.innerHTML = qs.map((q, qi) => {
+    const labels = (q.options || []).map(o => o.label);
+    const a = ans ? (ans[qi] ?? '') : '';
+    const isCustom = a && !labels.includes(a);
+    const opts = (q.options || []).map(o =>
+      '<button type="button" class="ask-option' + (!isCustom && o.label === a ? ' selected' : '') + '" style="cursor:default"><b>' + escapeHtml(o.label) + '</b>'
+      + (o.description ? '<br><span class="ask-desc">' + escapeHtml(o.description) + '</span>' : '') + '</button>').join('');
+    let row = '<div class="ask-q">\u2753 ' + escapeHtml(q.question) + '</div>'
+      + '<div class="ask-options">' + opts + '</div>';
+    if (rec.status === 'timeout') row += '<div class="ask-a">\u23F3 No answer</div>';
+    else if (isCustom || !labels.length) row += '<div class="ask-a">\u2705 ' + escapeHtml(a) + '</div>';
+    return '<div class="ask-block">' + row + '</div>';
+  }).join('');
+  return card;
+}
+
 function collectAskAnswers(card) {
   const qs = card._askQuestions || [];
   const vals = [];
@@ -488,32 +572,17 @@ function collectAskAnswers(card) {
     if (!v) { if (inp) { inp.focus(); inp.placeholder = 'Required'; } return; }
     vals.push(v);
   }
-  submitAsk(card._askId, vals, card);
+  const rec = (turn && turn.asks || []).find(x => x.id === card._askId);
+  if (rec) { rec.answers = vals; rec.active = false; }
+  card.replaceWith(buildAnsweredAskCard({ questions: qs, answers: vals, status: 'answered' }));
+  fetch('/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: card._askId, value: vals }) }).catch(() => {});
 }
-async function submitAsk(askId, value, card) {
-  const qs = card._askQuestions || [];
-  const arr = Array.isArray(value) ? value : [value];
-  card.classList.add('answered');
-  card.innerHTML = qs.map((q, i) =>
-    '<div class="ask-q">\u2753 ' + escapeHtml(q.question) + '</div>'
-    + '<div class="ask-a">\u2705 ' + escapeHtml(arr[i] ?? '') + '</div>').join('');
-  try {
-    await fetch('/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: askId, value }) });
-  } catch (e) {}
-}
+
 function renderArchivedAsk(rec) {
-  const card = document.createElement('div');
-  card.className = 'msg ask-card answered';
-  const qs = rec.questions || [];
-  const ans = Array.isArray(rec.answers) ? rec.answers
-    : (rec.answers != null ? [rec.answers] : null);
-  card.innerHTML = qs.map((q, i) =>
-    '<div class="ask-q">\u2753 ' + escapeHtml(q.question) + '</div>'
-    + '<div class="ask-a">' + (rec.status === 'timeout' || !ans ? '\u23F3 No answer' : '\u2705 ' + escapeHtml(ans[i] ?? '')) + '</div>'
-  ).join('');
-  msgs.appendChild(card);
+  msgs.appendChild(buildAnsweredAskCard(rec));
 }
+
 /* ---------- config modal ---------- */
 (async () => {
   try {
