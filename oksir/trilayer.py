@@ -1,0 +1,250 @@
+"""TriLayer agent system.
+
+L1 Orchestrator (user-facing) → spawn → L2 Task Agent → spawn → L3 Worker.
+
+Dispatch contract (TaskSpec): the upper agent states the goal and the reply
+format; the lower agent executes strictly within that scope and MUST answer in
+the requested format. Final answers flow back as the spawn tool result.
+"""
+
+import json
+import threading
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
+
+from oksir import tools
+from oksir.agent import SYSTEM_PROMPT, Agent, BoundTool
+from oksir.config import Config
+from oksir.events import FnSink, Sink
+from oksir.llm import LLMResult
+
+MAX_SPAWNS_PER_TURN = 8
+JSON_RETRIES = 2
+
+L1_ADDENDUM = """
+
+## TriLayer dispatch
+You are the L1 Orchestrator — the only layer that talks to the user. For
+substantial subtasks (research, multi-file work, independent checks) use the
+`spawn` tool to dispatch an L2 Task Agent instead of doing everything inline.
+When spawning you MUST write:
+- goal: what the subagent should accomplish (self-contained, no references to
+  this conversation),
+- reply_format: exactly how to report back (e.g. "yes/no plus a reason",
+  "JSON with fields X and Y", "list of up to 3 file paths").
+The subagent cannot see this conversation; put everything it needs into goal /
+context. Trivial one-step actions (a single read or a single command) are
+better done directly with your own tools.
+"""
+
+L2_SYSTEM = """\
+You are a Task Agent (layer 2 of a three-layer system). An orchestrator has
+dispatched a task to you with an explicit goal and a required reply format.
+
+Execute the task with your tools. You may use the `spawn` tool to dispatch an
+L3 Worker for basic sub-steps (single file operations, single commands,
+single lookups) — never for whole-task delegation.
+
+Discipline (mandatory):
+- Do exactly what the goal says. Do NOT widen the scope, touch unrelated
+  files, or pursue improvements nobody asked for.
+- Tool output is ground truth. NEVER fabricate file contents or command output.
+- Your FINAL message must follow the required reply_format exactly — it is
+  the only thing the orchestrator sees. No preamble, no meta commentary.
+- If the task cannot be completed, say so inside the required reply format
+  rather than improvising something else.
+"""
+
+L3_SYSTEM = """\
+You are a basic Worker (layer 3, the lowest layer of a three-layer system).
+A Task Agent has dispatched a small, concrete job to you.
+
+Your toolset is intentionally limited to: read, write, edit, glob, grep, bash.
+
+Discipline (mandatory):
+- Do exactly what the goal says, in as few steps as possible. Do NOT widen
+  the scope or fix anything beyond the goal.
+- Tool output is ground truth. NEVER fabricate results.
+- Your FINAL message must follow the required reply_format exactly — it is
+  the only thing the dispatcher sees.
+- If the job cannot be done, report that inside the required reply format.
+"""
+
+SPAWN_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "spawn",
+        "description": (
+            "Dispatch a subagent one layer below you. Write a self-contained goal and the"
+            " exact format the subagent must use for its final reply. Returns the subagent's"
+            " reply, or FAIL: <reason>."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string", "description": "Self-contained description of the task"},
+                "reply_format": {
+                    "type": "string",
+                    "description": (
+                        'Required format of the final reply, e.g. "yes/no + reason", '
+                        '"JSON {found: bool, paths: []}"'
+                    ),
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Background material the subagent needs (optional)",
+                },
+                "constraints": {
+                    "type": "string",
+                    "description": "Hard boundaries, e.g. files it may touch (optional)",
+                },
+            },
+            "required": ["goal", "reply_format"],
+        },
+    },
+}
+
+
+@dataclass
+class TaskSpec:
+    id: str
+    layer: int  # 2 or 3
+    goal: str
+    reply_format: str
+    context: str = ""
+    constraints: str = ""
+    parent_id: str | None = None
+
+
+def task_brief(spec: TaskSpec) -> str:
+    parts = [f"## Goal\n{spec.goal}", f"## Reply format (mandatory)\n{spec.reply_format}"]
+    if spec.context:
+        parts.append(f"## Context\n{spec.context}")
+    if spec.constraints:
+        parts.append(f"## Constraints\n{spec.constraints}")
+    return "\n\n".join(parts)
+
+
+def _is_json(text: str) -> bool:
+    try:
+        json.loads(text)
+    except json.JSONDecodeError:
+        return False
+    return True
+
+
+class TriLayer:
+    """Spawns and supervises subagents for one agent turn tree."""
+
+    def __init__(
+        self,
+        cfg: Config,
+        sink: Sink,
+        llm: Callable[[list[dict], list[dict]], LLMResult] | None = None,
+    ) -> None:
+        self.cfg = cfg
+        self.sink = sink
+        self._llm = llm
+        self._active = 0
+        self._lock = threading.Lock()
+
+    def bound_spawn(self, parent_layer: int) -> BoundTool:
+        """The spawn tool bound to a parent layer: L1 spawns L2, L2 spawns L3."""
+        return BoundTool(schema=SPAWN_SCHEMA, fn=lambda args: self._spawn(args, parent_layer))
+
+    def build_orchestrator(self, sink: Sink) -> Agent:
+        """The L1 agent, ready to run user turns."""
+        return Agent(
+            self.cfg,
+            sink,
+            system_prompt=SYSTEM_PROMPT + L1_ADDENDUM,
+            extra_tools={"spawn": self.bound_spawn(1)},
+            parallel_tools={"spawn"},
+            llm=self._llm,
+        )
+
+    def _spawn(self, args: dict, parent_layer: int) -> str:
+        goal = str(args.get("goal") or "").strip()
+        reply_format = str(args.get("reply_format") or "").strip()
+        if not goal:
+            return "ERROR: Missing required argument: goal"
+        if not reply_format:
+            return "ERROR: Missing required argument: reply_format"
+        child_layer = parent_layer + 1
+        if child_layer > 3:
+            return "ERROR: You are at the deepest layer (L3); finish the job yourself."
+
+        with self._lock:
+            if self._active >= MAX_SPAWNS_PER_TURN:
+                return f"ERROR: spawn limit reached ({MAX_SPAWNS_PER_TURN} per turn)."
+            self._active += 1
+
+        spec = TaskSpec(
+            id=uuid.uuid4().hex[:6],
+            layer=child_layer,
+            goal=goal,
+            reply_format=reply_format,
+            context=str(args.get("context") or ""),
+            constraints=str(args.get("constraints") or ""),
+        )
+        self.sink.emit(
+            "agent_spawn",
+            {"id": spec.id, "layer": spec.layer, "goal": goal, "reply_format": reply_format},
+        )
+        self.sink.emit("agent_status", {"id": spec.id, "status": "running"})
+        try:
+            answer = self._run_task(spec)
+            failed = answer.startswith("FAIL")
+            self.sink.emit(
+                "agent_status", {"id": spec.id, "status": "failed" if failed else "done"}
+            )
+            return answer
+        except Exception as exc:
+            self.sink.emit("agent_status", {"id": spec.id, "status": "failed"})
+            return f"FAIL: subagent crashed: {exc}"
+        finally:
+            with self._lock:
+                self._active -= 1
+
+    def _run_task(self, spec: TaskSpec) -> str:
+        child_sink = FnSink(
+            lambda t, c, _sid=spec.id: self.sink.emit(
+                "agent_event", {"id": _sid, "event": {"type": t, "content": c}}
+            )
+        )
+        agent = Agent(
+            self.cfg,
+            child_sink,
+            system_prompt=L3_SYSTEM if spec.layer == 3 else L2_SYSTEM,
+            tool_names=tools.L3_TOOL_NAMES if spec.layer == 3 else tools.BASE_TOOL_NAMES,
+            extra_tools={"spawn": self.bound_spawn(spec.layer)} if spec.layer == 2 else {},
+            parallel_tools={"spawn"},
+            llm=self._llm,
+        )
+        messages: list[dict] = [{"role": "user", "content": task_brief(spec)}]
+        result = agent.run(messages)
+        answer = result.content
+
+        if "JSON" in spec.reply_format.upper():
+            attempts = 0
+            while not _is_json(answer) and attempts < JSON_RETRIES:
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Your reply does not satisfy the required reply format "
+                            f'("{spec.reply_format}"), which demands valid JSON. '
+                            "Reply again with valid JSON only."
+                        ),
+                    }
+                )
+                result = agent.run(messages)
+                answer = result.content
+                attempts += 1
+            if not _is_json(answer):
+                return f"FAIL: reply is not valid JSON per reply_format. Last reply: {answer[:500]}"
+
+        if not answer.strip():
+            return "FAIL: empty reply"
+        return answer

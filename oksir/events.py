@@ -51,6 +51,21 @@ class ConsoleSink:
         elif event_type == "reasoning":
             sys.stdout.write(f"{self._COLORS['reasoning']}{content}{self._RESET}")
             sys.stdout.flush()
+        elif event_type == "agent_spawn":
+            layer = content.get("layer", 2)
+            goal = str(content.get("goal", ""))[:100]
+            print(f"\n\033[35m  \U0001f9e9 spawn L{layer}: {goal}\033[0m")
+        elif event_type == "agent_status":
+            marks = {"running": "\u23f3", "done": "\u2705", "failed": "\u274c"}
+            mark = marks.get(content.get("status"), "")
+            print(f"\033[35m  {mark} L-agent {content.get('id')} {content.get('status')}\033[0m")
+        elif event_type == "agent_event":
+            inner = content.get("event") or {}
+            kind = inner.get("type")
+            if kind == "tool":
+                print(f"\033[90m      \u21b3 [{inner['content'].get('name')}]\033[0m")
+            elif kind == "error":
+                print(f"\033[31m      \u21b3 error: {inner.get('content')}\033[0m")
         elif event_type == "error":
             print(f"\n[ERROR: {content}]")
         # newline / reasoning_start / reasoning_end: console-only cosmetics, ignored here

@@ -1,6 +1,7 @@
 """Agent turn loop: stream a completion, dispatch tool calls, repeat (max rounds)."""
 
 import json
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -62,12 +63,14 @@ class Agent:
         tool_names: frozenset[str] | set[str] | None = None,
         extra_tools: dict[str, BoundTool] | None = None,
         llm: Callable[[list[dict], list[dict]], LLMResult] | None = None,
+        parallel_tools: frozenset[str] | set[str] = frozenset(),
     ) -> None:
         self.cfg = cfg
         self.sink = sink
         self.system_prompt = system_prompt
         self.tool_names = tool_names
         self.extra_tools = extra_tools or {}
+        self.parallel_tools = frozenset(parallel_tools)
         self._llm = llm
 
     @property
@@ -134,13 +137,56 @@ class Agent:
                     "reasoning": result.reasoning,
                 }
             )
-            for tc in result.tool_calls:
-                self._run_tool_call(tc, messages)
+            self._run_tool_calls(result.tool_calls, messages)
 
         self.sink.emit("error", f"Max tool rounds ({MAX_TOOL_ROUNDS}) reached")
         hit = f"(Hit max tool rounds: {MAX_TOOL_ROUNDS}.)"
         messages.append({"role": "assistant", "content": hit})
         return result
+
+    def _run_tool_calls(self, tool_calls: list[dict], messages: list[dict]) -> None:
+        """Dispatch tool calls; run them concurrently when all are whitelisted as parallel."""
+        parallel = len(tool_calls) > 1 and all(
+            tc["function"]["name"] in self.parallel_tools for tc in tool_calls
+        )
+        if not parallel:
+            for tc in tool_calls:
+                self._run_tool_call(tc, messages)
+            return
+
+        parsed = [(tc, self._parse_args(tc)) for tc in tool_calls]
+        for tc, _args in parsed:
+            self.sink.emit(
+                "tool",
+                {
+                    "name": tc["function"]["name"],
+                    "args": tc["function"]["arguments"],
+                    "id": tc["id"],
+                },
+            )
+        outputs: list[str] = [""] * len(parsed)
+
+        def worker(index: int, tc: dict, args: dict) -> None:
+            outputs[index] = self._dispatch(tc["function"]["name"], args)
+
+        threads = [
+            threading.Thread(target=worker, args=(i, tc, args), daemon=True)
+            for i, (tc, args) in enumerate(parsed)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        for (tc, _args), output in zip(parsed, outputs, strict=True):
+            self.sink.emit("tool_result", {"content": _truncate(output), "id": tc["id"]})
+            messages.append({"role": "tool", "tool_call_id": tc["id"], "content": output})
+
+    @staticmethod
+    def _parse_args(tc: dict) -> dict:
+        try:
+            return json.loads(tc["function"]["arguments"] or "{}")
+        except json.JSONDecodeError:
+            return {}
 
 
 def _truncate(text: str, limit: int = TRUNCATE_TOOL_RESULT) -> str:

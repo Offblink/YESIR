@@ -8,8 +8,9 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from oksir import session
-from oksir.agent import SYSTEM_PROMPT, Agent
+from oksir.agent import SYSTEM_PROMPT
 from oksir.config import load_config, save_config
+from oksir.trilayer import TriLayer
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
@@ -183,11 +184,10 @@ class OkSirHandler(BaseHTTPRequestHandler):
 
         try:
             messages.append({"role": "user", "content": user_msg})
-            agent = Agent(cfg, sink)
+            trilayer = TriLayer(cfg, sink)
+            agent = trilayer.build_orchestrator(sink)
             agent.run(messages)
             session.save_session(session_id, session.get_session_title(messages), messages)
-            sink.emit("sessionId", session_id)
-            sink.emit("done", None)
         except Exception as exc:
             sink.emit("error", str(exc))
             sink.emit("done", None)
