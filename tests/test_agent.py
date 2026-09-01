@@ -1,6 +1,6 @@
 """Tests for the agent turn loop, driven by scripted (Fake) LLM completions."""
 
-from oksir.agent import Agent, BoundTool
+from oksir.agent import Agent, BoundTool, wrap_reasoning_events
 from oksir.config import Config
 from oksir.events import FnSink
 from oksir.llm import LLMError, LLMResult
@@ -160,3 +160,29 @@ def test_session_messages_reused():
     agent.run(messages)
     assert sum(1 for m in messages if m["role"] == "system") == 1
     assert messages[0]["content"] == "custom"
+
+
+def test_wrap_reasoning_events_brackets_stream():
+    events: list = []
+    sink = FnSink(lambda t, c: events.append((t, c)))
+    on_delta, state = wrap_reasoning_events(sink)
+    on_delta("reasoning", "a")
+    on_delta("reasoning", "b")
+    on_delta("text", "x")
+    assert [t for t, _ in events] == [
+        "reasoning_start",
+        "reasoning",
+        "reasoning",
+        "reasoning_end",
+        "text",
+    ]
+    assert state == {"started": True, "ended": True}
+
+
+def test_wrap_reasoning_events_no_reasoning_no_events():
+    events: list = []
+    sink = FnSink(lambda t, c: events.append((t, c)))
+    on_delta, state = wrap_reasoning_events(sink)
+    on_delta("text", "x")
+    assert events == [("text", "x")]
+    assert state == {"started": False, "ended": False}

@@ -111,6 +111,7 @@ async function switchSession(id) {
         else addDiv('tool', '<pre>' + escapeHtml(m.content || '') + '</pre>');
       }
     }
+    (s.asks || []).forEach(renderArchivedAsk);
     renderSessionList(); loadSessions();
   } catch (e) { console.error('switchSession:', e); }
 }
@@ -442,42 +443,77 @@ function handleAsk(content) {
   if (existing) existing.remove();
   const card = document.createElement('div');
   card.className = 'msg ask-card'; card.id = 'ask-card';
-  const options = (content.options || []).map((o, i) =>
-    '<button class="ask-option" data-i="' + i + '"><b>' + escapeHtml(o.label) + '</b>'
-    + (o.description ? '<br><span class="ask-desc">' + escapeHtml(o.description) + '</span>' : '') + '</button>').join('');
-  card.innerHTML = '<div class="ask-q">\u2753 ' + escapeHtml(content.question) + '</div>'
-    + '<div class="ask-options">' + options + '</div>'
-    + (content.allow_custom !== false
-      ? '<div class="ask-custom"><input id="ask-input" placeholder="Or type your own answer...">'
-        + '<button id="ask-submit">Submit</button></div>' : '');
+  const qs = content.questions || [];
+  card._askId = content.id; card._askQuestions = qs;
+  let html = '';
+  qs.forEach((q, qi) => {
+    const opts = (q.options || []).map(o =>
+      '<button type="button" class="ask-option" data-q="' + qi + '"><b>' + escapeHtml(o.label) + '</b>'
+      + (o.description ? '<br><span class="ask-desc">' + escapeHtml(o.description) + '</span>' : '') + '</button>').join('');
+    html += '<div class="ask-q">\u2753 ' + escapeHtml(q.question) + '</div>'
+      + '<div class="ask-options">' + opts + '</div>'
+      + ((!opts || q.allow_custom !== false)
+        ? '<input class="ask-input" data-q="' + qi + '" placeholder="' + (opts ? 'Or type your own...' : 'Your answer...') + '">'
+        : '');
+  });
+  html += '<div class="ask-actions"><button id="ask-submit">Submit</button></div>';
+  card.innerHTML = html;
   msgs.insertBefore(card, document.getElementById('assistant-msg') || null);
   msgs.scrollTop = msgs.scrollHeight;
-  let chosen = null;
-  card.querySelectorAll('.ask-option').forEach(btnEl => {
-    btnEl.addEventListener('click', () => {
-      chosen = btnEl.querySelector('b').textContent;
-      submitAsk(content.id, chosen, card);
+  card.querySelectorAll('.ask-option').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const qi = btn.dataset.q;
+      card.querySelectorAll('.ask-option[data-q="' + qi + '"]').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      const inp = card.querySelector('.ask-input[data-q="' + qi + '"]');
+      if (inp) inp.value = '';
     });
   });
-  const submitBtn = card.querySelector('#ask-submit');
-  if (submitBtn) submitBtn.addEventListener('click', () => {
-    const val = card.querySelector('#ask-input').value.trim();
-    if (val) submitAsk(content.id, val, card);
+  card.querySelectorAll('.ask-input').forEach(inp => {
+    inp.addEventListener('input', () => {
+      const qi = inp.dataset.q;
+      card.querySelectorAll('.ask-option[data-q="' + qi + '"]').forEach(b => b.classList.remove('selected'));
+    });
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') collectAskAnswers(card); });
   });
-  const inp = card.querySelector('#ask-input');
-  if (inp) inp.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { const val = inp.value.trim(); if (val) submitAsk(content.id, val, card); }
-  });
+  card.querySelector('#ask-submit').addEventListener('click', () => collectAskAnswers(card));
+}
+function collectAskAnswers(card) {
+  const qs = card._askQuestions || [];
+  const vals = [];
+  for (let qi = 0; qi < qs.length; qi++) {
+    const sel = card.querySelector('.ask-option.selected[data-q="' + qi + '"]');
+    const inp = card.querySelector('.ask-input[data-q="' + qi + '"]');
+    const v = sel ? sel.querySelector('b').textContent : (inp ? inp.value.trim() : '');
+    if (!v) { if (inp) { inp.focus(); inp.placeholder = 'Required'; } return; }
+    vals.push(v);
+  }
+  submitAsk(card._askId, vals, card);
 }
 async function submitAsk(askId, value, card) {
+  const qs = card._askQuestions || [];
+  const arr = Array.isArray(value) ? value : [value];
   card.classList.add('answered');
-  card.innerHTML = '<div class="ask-q">\u2753 Answered: <b>' + escapeHtml(value) + '</b></div>';
+  card.innerHTML = qs.map((q, i) =>
+    '<div class="ask-q">\u2753 ' + escapeHtml(q.question) + '</div>'
+    + '<div class="ask-a">\u2705 ' + escapeHtml(arr[i] ?? '') + '</div>').join('');
   try {
     await fetch('/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: askId, value }) });
   } catch (e) {}
 }
-
+function renderArchivedAsk(rec) {
+  const card = document.createElement('div');
+  card.className = 'msg ask-card answered';
+  const qs = rec.questions || [];
+  const ans = Array.isArray(rec.answers) ? rec.answers
+    : (rec.answers != null ? [rec.answers] : null);
+  card.innerHTML = qs.map((q, i) =>
+    '<div class="ask-q">\u2753 ' + escapeHtml(q.question) + '</div>'
+    + '<div class="ask-a">' + (rec.status === 'timeout' || !ans ? '\u23F3 No answer' : '\u2705 ' + escapeHtml(ans[i] ?? '')) + '</div>'
+  ).join('');
+  msgs.appendChild(card);
+}
 /* ---------- config modal ---------- */
 (async () => {
   try {

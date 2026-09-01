@@ -129,3 +129,10 @@ html,body{font-family:var(--font);font-size:14.5px;line-height:1.6;color:var(--t
 .ask-custom input:focus{border-color:var(--accent)}
 .ask-custom button{background:var(--accent);color:#fff;border:none;border-radius:var(--radius-xs);padding:0.5rem 1rem;font-weight:600;cursor:pointer}
 .ask-custom button:hover{background:var(--accent-hover)}
+.ask-option.selected{border-color:var(--accent);background:var(--accent-glow);box-shadow:0 0 0 3px var(--accent-glow)}
+.ask-input{width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-xs);padding:0.5rem 0.75rem;font-size:0.82rem;outline:none;margin-top:0.5rem;font-family:var(--font);color:var(--text)}
+.ask-input:focus{border-color:var(--accent)}
+.ask-actions{display:flex;justify-content:flex-end;margin-top:0.8rem}
+.ask-actions button{background:var(--accent);color:#fff;border:none;border-radius:var(--radius-xs);padding:0.55rem 1.4rem;font-weight:600;cursor:pointer}
+.ask-actions button:hover{background:var(--accent-hover)}
+.ask-a{color:var(--text);font-size:0.84rem;margin-bottom:0.6rem;padding-left:0.25rem}

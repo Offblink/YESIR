@@ -116,7 +116,12 @@ class OkSirHandler(BaseHTTPRequestHandler):
             self._handle_chat()
         elif url.path == "/answer":
             data = self._read_body()
-            ok = resolve_ask(str(data.get("id") or ""), str(data.get("value") or ""))
+            value = data.get("value")
+            if isinstance(value, list):
+                value = [str(v) for v in value]
+            else:
+                value = str(value or "")
+            ok = resolve_ask(str(data.get("id") or ""), value)
             self._send_json({"ok": ok}, status=200 if ok else 404)
         elif url.path == "/configure":
             data = self._read_body()
@@ -192,8 +197,13 @@ class OkSirHandler(BaseHTTPRequestHandler):
             agent.run(messages)
             prior = (stored or {}).get("subagents", []) if isinstance(stored, dict) else []
             merged = prior + list(trilayer.subagents.values())
+            prior_asks = (stored or {}).get("asks", []) if isinstance(stored, dict) else []
             session.save_session(
-                session_id, session.get_session_title(messages), messages, subagents=merged
+                session_id,
+                session.get_session_title(messages),
+                messages,
+                subagents=merged,
+                asks=prior_asks + list(trilayer.asks),
             )
             sink.emit("sessionId", session_id)
             sink.emit("done", None)

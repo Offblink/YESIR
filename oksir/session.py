@@ -64,6 +64,7 @@ def save_session(
     title: str,
     messages: list[dict[str, Any]],
     subagents: list[dict[str, Any]] | None = None,
+    asks: list[dict[str, Any]] | None = None,
 ) -> None:
     ensure_dir()
     path = SESSIONS_DIR / f"{session_id}.json"
@@ -78,6 +79,7 @@ def save_session(
         "updated": _now(),
         "messages": messages,
         "subagents": subagents or [],
+        "asks": asks or [],
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from oksir import tools
 from oksir.config import Config
-from oksir.events import Sink
+from oksir.events import EmitFn, Sink
 from oksir.llm import LLMError, LLMResult, stream_chat
 
 MAX_TOOL_ROUNDS = 25
@@ -48,6 +48,24 @@ class BoundTool:
     with_call_id: bool = False  # fn also receives the tool_call id
 
 
+def wrap_reasoning_events(sink: Sink) -> tuple[EmitFn, dict]:
+    """Delta callback that brackets the first/last reasoning delta with
+    reasoning_start / reasoning_end events (the web UI builds its thinking
+    fold on reasoning_start and drops bare reasoning deltas)."""
+    state = {"started": False, "ended": False}
+
+    def on_delta(kind: str, text: str) -> None:
+        if kind == "reasoning" and not state["started"]:
+            state["started"] = True
+            sink.emit("reasoning_start", None)
+        if state["started"] and not state["ended"] and kind != "reasoning":
+            state["ended"] = True
+            sink.emit("reasoning_end", None)
+        sink.emit(kind, text)
+
+    return on_delta, state
+
+
 class Agent:
     """One agent conversation loop. Owns no history: the caller passes the message list.
 
@@ -81,12 +99,15 @@ class Agent:
         return defs
 
     def _default_llm(self, messages: list[dict], tool_defs: list[dict]) -> LLMResult:
-        def on_delta(kind: str, text: str) -> None:
-            self.sink.emit(kind, text)
+        on_delta, state = wrap_reasoning_events(self.sink)
 
-        return stream_chat(
+        result = stream_chat(
             self.cfg.model, self.cfg.endpoint, self.cfg.api_key, messages, tool_defs, on_delta
         )
+        # Reasoning-only turns (pure tool calls) never see a text delta.
+        if state["started"] and not state["ended"]:
+            self.sink.emit("reasoning_end", None)
+        return result
 
     def _dispatch(self, name: str, args: dict, call_id: str | None = None) -> str:
         bound = self.extra_tools.get(name)

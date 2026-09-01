@@ -95,14 +95,18 @@ class TaskSpec:
 
 ```json
 {"name": "ask_user",
- "parameters": {"question": "str, required",
+ "parameters": {"question": "str, required（单问）",
                 "options": {"type": "array", "items": {"label": "str", "description": "str?"}, "required": false},
-                "allow_custom": "bool, optional (default true)"}}
+                "allow_custom": "bool, optional (default true)",
+                "questions": {"type": "array", "items": {"question": "str", "options": "array?", "allow_custom": "bool?"}, "required": false}}}
 ```
 
-- 行为：生成 ask 事件 → 在 `PendingAsk` 注册表登记 → `threading.Event.wait()` 阻塞 → UI `POST /answer {id, value}` → 唤醒 → 返回 `"USER: <value>"` 作为 tool result。
+- 单问用 `question`（+可选 `options`/`allow_custom`）；多问用 `questions` 数组，每项可自带 `options`（缺省无选项=纯文本输入）与 `allow_custom`（缺省继承顶层，默认 true）。
+- 行为：生成 `ask` 事件 → 在 `PendingAsk` 注册表登记 → `threading.Event.wait()` 阻塞（期间每 15s 向 sink 发 `ping` 保活，防止浏览器掐断静默流）→ UI `POST /answer {id, value}` → 唤醒 → 返回 `"USER: <value>"`（多问时 `value` 为数组，结果格式化为 `USER:\n1. ...\n2. ...`）。
 - 超时 300s，超时返回 `"ERROR: 用户未回答"`。
-- 仅 L1 工具表含此工具（权限表固化在 `tools/__init__.py`）。
+- 事件 content 统一归一化为 `{id, questions: [{question, options: [{label, description?}], allow_custom}]}`。
+- 持久化：每条 ask 结束（回答或超时）时通过回调记入 `TriLayer.asks`（`{id, questions, answers, status}`），随会话落盘（session `asks` 字段）；UI 重进/刷新后以已答卡片回放。
+- 仅 L1 工具表含此工具（在 `TriLayer.build_orchestrator` 以 BoundTool 挂载）。
 
 ### 2.5 LLM 客户端（`llm.py`）
 

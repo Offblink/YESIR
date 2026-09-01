@@ -90,15 +90,73 @@ def test_ask_user_returns_answer():
     assert tool_msgs[0]["content"] == "USER: 是"
 
     ask_content = next(c for t, c in events if t == "ask")
-    assert set(ask_content) == {"id", "question", "options", "allow_custom"}
-    assert ask_content["question"] == "继续吗?"
-    assert ask_content["options"] == [{"label": "是"}, {"label": "否"}]
-    assert ask_content["allow_custom"] is True
+    assert set(ask_content) == {"id", "questions"}
+    (q,) = ask_content["questions"]
+    assert q["question"] == "继续吗?"
+    assert q["options"] == [{"label": "是"}, {"label": "否"}]
+    assert q["allow_custom"] is True
     # registry is drained after the ask completes
     assert not ask_mod._pending
 
 
-def test_ask_user_timeout(monkeypatch):
+def test_multi_question_numbered_answer():
+    events: list = []
+    sink = FnSink(lambda t, c: events.append((t, c)))
+    fake = ScriptedLLM(
+        [
+            LLMResult(
+                tool_calls=[
+                    tool_call(
+                        "ask_user",
+                        {
+                            "questions": [
+                                {"question": "项目名?", "options": [{"label": "OKSIR"}]},
+                                {"question": "端口?"},
+                            ]
+                        },
+                    )
+                ]
+            ),
+            LLMResult(content="done"),
+        ]
+    )
+
+    def resolver() -> None:
+        content = first_ask(events)
+        assert resolve_ask(content["id"], ["OKSIR", "8799"])
+
+    thread = threading.Thread(target=resolver)
+    thread.start()
+    messages = run_orchestrator(fake, sink)
+    thread.join(5)
+    tool_msgs = [m for m in messages if m.get("role") == "tool"]
+    assert tool_msgs[0]["content"] == "USER:\n1. OKSIR\n2. 8799"
+
+    (q1, q2) = next(c for t, c in events if t == "ask")["questions"]
+    assert q1["options"] == [{"label": "OKSIR"}]
+    assert q2["options"] == [] and q2["allow_custom"] is True
+
+
+def test_completed_ask_recorded_for_persistence():
+    records: list = []
+    events: list = []
+    sink = FnSink(lambda t, c: events.append((t, c)))
+    tool = make_ask_tool(sink, on_answer=records.append)
+    thread = threading.Thread(target=lambda: tool.fn({"question": "q?", "options": ["a"]}))
+    thread.start()
+    content = first_ask(events)
+    resolve_ask(content["id"], "a")
+    thread.join(5)
+    (rec,) = records
+    assert rec == {
+        "id": content["id"],
+        "questions": [{"question": "q?", "options": [{"label": "a"}], "allow_custom": True}],
+        "answers": "a",
+        "status": "answered",
+    }
+
+
+def test_timeout_recorded_with_timeout_status(monkeypatch):
     monkeypatch.setattr(ask_mod, "ASK_TIMEOUT_S", 0.05)
     events: list = []
     sink = FnSink(lambda t, c: events.append((t, c)))
@@ -108,10 +166,14 @@ def test_ask_user_timeout(monkeypatch):
             LLMResult(content="算了"),
         ]
     )
-    messages = run_orchestrator(fake, sink)
+    tl = TriLayer(CFG, sink, llm=fake)
+    agent = tl.build_orchestrator(sink)
+    messages = [{"role": "user", "content": "hi"}]
+    agent.run(messages)
     tool_msgs = [m for m in messages if m.get("role") == "tool"]
     assert tool_msgs[0]["content"] == "ERROR: 用户未回答"
     assert ("ping", None) in events  # heartbeat kept the stream alive
+    assert tl.asks and tl.asks[0]["status"] == "timeout" and tl.asks[0]["answers"] is None
     # timed-out ask cannot be resolved anymore
     ask_content = next(c for t, c in events if t == "ask")
     assert not resolve_ask(ask_content["id"], "太晚了")
@@ -121,6 +183,9 @@ def test_ask_user_missing_question():
     tool = make_ask_tool(NullSink())
     assert tool.fn({}) == "ERROR: Missing required argument: question"
     assert tool.fn({"question": "   "}) == "ERROR: Missing required argument: question"
+    assert tool.fn({"questions": [{"no_question": 1}]}) == (
+        "ERROR: Missing required argument: question"
+    )
 
 
 def test_resolve_unknown_id():
@@ -139,8 +204,11 @@ def test_options_normalization():
     thread = threading.Thread(target=lambda: tool.fn(dict(args)))
     thread.start()
     content = first_ask(events)
-    assert content["options"] == [{"label": "plain"}, {"label": "l1", "description": "d1"}]
-    assert content["allow_custom"] is False
+    assert content["questions"][0]["options"] == [
+        {"label": "plain"},
+        {"label": "l1", "description": "d1"},
+    ]
+    assert content["questions"][0]["allow_custom"] is False
     assert resolve_ask(content["id"], "ok")
     thread.join(5)
     assert not thread.is_alive()
@@ -150,7 +218,12 @@ def test_ask_schema_shape():
     fn = ASK_SCHEMA["function"]
     assert fn["name"] == "ask_user"
     assert fn["parameters"]["required"] == ["question"]
-    assert set(fn["parameters"]["properties"]) == {"question", "options", "allow_custom"}
+    assert set(fn["parameters"]["properties"]) == {
+        "question",
+        "options",
+        "allow_custom",
+        "questions",
+    }
 
 
 def test_only_orchestrator_has_ask_user():

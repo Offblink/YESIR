@@ -158,6 +158,7 @@ class TriLayer:
         self._lock = threading.Lock()
         # spec_id -> {id, call_id, layer, goal, reply_format, status, events: [...]}
         self.subagents: dict[str, dict] = {}
+        self.asks: list[dict] = []  # completed ask_user records (for persistence)
 
     def bound_spawn(self, parent_layer: int) -> BoundTool:
         """The spawn tool bound to a parent layer: L1 spawns L2, L2 spawns L3."""
@@ -174,7 +175,10 @@ class TriLayer:
             self.cfg,
             sink,
             system_prompt=SYSTEM_PROMPT + L1_ADDENDUM,
-            extra_tools={"spawn": self.bound_spawn(1), "ask_user": make_ask_tool(sink)},
+            extra_tools={
+                "spawn": self.bound_spawn(1),
+                "ask_user": make_ask_tool(sink, on_answer=self.asks.append),
+            },
             parallel_tools={"spawn"},
             llm=self._llm,
         )
