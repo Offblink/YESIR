@@ -18,6 +18,7 @@ from oksir.agent import SYSTEM_PROMPT, Agent, BoundTool
 from oksir.config import Config
 from oksir.events import FnSink, Sink
 from oksir.llm import LLMResult
+from oksir.tools.ask import make_ask_tool
 
 MAX_SPAWNS_PER_TURN = 8
 JSON_RETRIES = 2
@@ -33,9 +34,16 @@ When spawning you MUST write:
   this conversation),
 - reply_format: exactly how to report back (e.g. "yes/no plus a reason",
   "JSON with fields X and Y", "list of up to 3 file paths").
-The subagent cannot see this conversation; put everything it needs into goal /
 context. Trivial one-step actions (a single read or a single command) are
 better done directly with your own tools.
+
+## Asking the user
+You are the only layer that can ask the user a question. Use `ask_user` when
+a decision genuinely needs the user's input (choosing between approaches,
+confirming something hard to undo). Offer clear `options` when possible; the
+user can also type a free-form answer. Asking blocks the turn until they
+answer, so ask only when it truly matters — do not ask for permission to do
+obvious work.
 """
 
 L2_SYSTEM = """\
@@ -166,7 +174,7 @@ class TriLayer:
             self.cfg,
             sink,
             system_prompt=SYSTEM_PROMPT + L1_ADDENDUM,
-            extra_tools={"spawn": self.bound_spawn(1)},
+            extra_tools={"spawn": self.bound_spawn(1), "ask_user": make_ask_tool(sink)},
             parallel_tools={"spawn"},
             llm=self._llm,
         )

@@ -59,6 +59,8 @@ class ConsoleSink:
             marks = {"running": "\u23f3", "done": "\u2705", "failed": "\u274c"}
             mark = marks.get(content.get("status"), "")
             print(f"\033[35m  {mark} L-agent {content.get('id')} {content.get('status')}\033[0m")
+        elif event_type == "ask":
+            print(f"\n\033[36m  \U0001f4dd {content.get('question', '')}\033[0m")
         elif event_type == "agent_event":
             inner = content.get("event") or {}
             kind = inner.get("type")

@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 from oksir import session
 from oksir.agent import SYSTEM_PROMPT
 from oksir.config import load_config, save_config
+from oksir.tools.ask import resolve_ask
 from oksir.trilayer import TriLayer
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -113,6 +114,10 @@ class OkSirHandler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/chat":
             self._handle_chat()
+        elif url.path == "/answer":
+            data = self._read_body()
+            ok = resolve_ask(str(data.get("id") or ""), str(data.get("value") or ""))
+            self._send_json({"ok": ok}, status=200 if ok else 404)
         elif url.path == "/configure":
             data = self._read_body()
             cfg = load_config()
