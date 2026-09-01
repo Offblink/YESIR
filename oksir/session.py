@@ -38,7 +38,11 @@ def list_sessions() -> list[dict[str, Any]]:
     """Metadata for all sessions, newest first. Broken files are skipped."""
     ensure_dir()
     result = []
-    for path in sorted(SESSIONS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+    for path in sorted(
+        SESSIONS_DIR.glob("*.json"),
+        key=lambda p: (p.stat().st_mtime, p.name),
+        reverse=True,
+    ):
         try:
             data = json.loads(path.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError):
