@@ -41,7 +41,8 @@ class WebSink:
                 line = json.dumps(obj, ensure_ascii=False) + "\n"
                 self._handler.wfile.write(line.encode("utf-8"))
                 self._handler.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError, OSError):
+        except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+            print(f"[websink] stream write failed: {type(exc).__name__}: {exc}", flush=True)
             self.closed = True
 
 
@@ -163,14 +164,12 @@ class OkSirHandler(BaseHTTPRequestHandler):
         user_msg = data.get("message", "")
         session_id = data.get("sessionId")
 
-        if session_id:
-            stored = session.load_session(session_id)
-            if stored:
-                messages = list(stored["messages"])
-            else:
-                messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        stored = session.load_session(session_id) if session_id else None
+        if stored:
+            messages = list(stored["messages"])
         else:
-            session_id = session.new_session_id()
+            if not session_id:
+                session_id = session.new_session_id()
             messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
         cfg = load_config()
@@ -181,13 +180,18 @@ class OkSirHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.close_connection = True
-
         try:
             messages.append({"role": "user", "content": user_msg})
             trilayer = TriLayer(cfg, sink)
             agent = trilayer.build_orchestrator(sink)
             agent.run(messages)
-            session.save_session(session_id, session.get_session_title(messages), messages)
+            prior = (stored or {}).get("subagents", []) if isinstance(stored, dict) else []
+            merged = prior + list(trilayer.subagents.values())
+            session.save_session(
+                session_id, session.get_session_title(messages), messages, subagents=merged
+            )
+            sink.emit("sessionId", session_id)
+            sink.emit("done", None)
         except Exception as exc:
             sink.emit("error", str(exc))
             sink.emit("done", None)

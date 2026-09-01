@@ -75,3 +75,28 @@ def test_delete():
     session.delete_session("del1")
     assert session.load_session("del1") is None
     session.delete_session("del1")  # idempotent
+
+
+def test_subagents_roundtrip():
+    subs = [
+        {
+            "id": "a1",
+            "call_id": "t1",
+            "layer": 2,
+            "goal": "g",
+            "reply_format": "r",
+            "status": "done",
+            "events": [{"type": "text", "content": "hi"}],
+        }
+    ]
+    session.save_session("sub1", "t", [{"role": "user", "content": "x"}], subagents=subs)
+    loaded = session.load_session("sub1")
+    assert loaded["subagents"] == subs
+
+    # merging: second save with different subagents replaces the list
+    session.save_session("sub1", "t", [], subagents=[*subs, dict(subs[0], id="a2")])
+    assert len(session.load_session("sub1")["subagents"]) == 2
+
+    # sessions saved without the field read back as empty list
+    session.save_session("sub2", "t", [])
+    assert session.load_session("sub2")["subagents"] == []

@@ -148,10 +148,17 @@ class TriLayer:
         self._llm = llm
         self._active = 0
         self._lock = threading.Lock()
+        # spec_id -> {id, call_id, layer, goal, reply_format, status, events: [...]}
+        self.subagents: dict[str, dict] = {}
 
     def bound_spawn(self, parent_layer: int) -> BoundTool:
         """The spawn tool bound to a parent layer: L1 spawns L2, L2 spawns L3."""
-        return BoundTool(schema=SPAWN_SCHEMA, fn=lambda args: self._spawn(args, parent_layer))
+
+        return BoundTool(
+            schema=SPAWN_SCHEMA,
+            fn=lambda args, call_id=None: self._spawn(args, parent_layer, call_id),
+            with_call_id=True,
+        )
 
     def build_orchestrator(self, sink: Sink) -> Agent:
         """The L1 agent, ready to run user turns."""
@@ -164,7 +171,7 @@ class TriLayer:
             llm=self._llm,
         )
 
-    def _spawn(self, args: dict, parent_layer: int) -> str:
+    def _spawn(self, args: dict, parent_layer: int, call_id: str | None = None) -> str:
         goal = str(args.get("goal") or "").strip()
         reply_format = str(args.get("reply_format") or "").strip()
         if not goal:
@@ -188,31 +195,44 @@ class TriLayer:
             context=str(args.get("context") or ""),
             constraints=str(args.get("constraints") or ""),
         )
+        record = {
+            "id": spec.id,
+            "call_id": call_id,
+            "layer": spec.layer,
+            "goal": goal,
+            "reply_format": reply_format,
+            "status": "running",
+            "events": [],
+        }
+        self.subagents[spec.id] = record
         self.sink.emit(
             "agent_spawn",
-            {"id": spec.id, "layer": spec.layer, "goal": goal, "reply_format": reply_format},
+            {
+                "id": spec.id,
+                "call_id": call_id,
+                "layer": spec.layer,
+                "goal": goal,
+                "reply_format": reply_format,
+            },
         )
         self.sink.emit("agent_status", {"id": spec.id, "status": "running"})
         try:
             answer = self._run_task(spec)
             failed = answer.startswith("FAIL")
-            self.sink.emit(
-                "agent_status", {"id": spec.id, "status": "failed" if failed else "done"}
-            )
+            status = "failed" if failed else "done"
+            self.sink.emit("agent_status", {"id": spec.id, "status": status})
+            record["status"] = status
             return answer
         except Exception as exc:
             self.sink.emit("agent_status", {"id": spec.id, "status": "failed"})
+            record["status"] = "failed"
             return f"FAIL: subagent crashed: {exc}"
         finally:
             with self._lock:
                 self._active -= 1
 
     def _run_task(self, spec: TaskSpec) -> str:
-        child_sink = FnSink(
-            lambda t, c, _sid=spec.id: self.sink.emit(
-                "agent_event", {"id": _sid, "event": {"type": t, "content": c}}
-            )
-        )
+        child_sink = FnSink(lambda t, c, _sid=spec.id: self._record_event(_sid, t, c))
         agent = Agent(
             self.cfg,
             child_sink,
@@ -248,3 +268,12 @@ class TriLayer:
         if not answer.strip():
             return "FAIL: empty reply"
         return answer
+
+    def _record_event(self, spec_id: str, event_type: str, content) -> None:
+        """Store the child event for replay, and forward it to the UI stream."""
+        record = self.subagents.get(spec_id)
+        if record is not None:
+            record["events"].append({"type": event_type, "content": content})
+        self.sink.emit(
+            "agent_event", {"id": spec_id, "event": {"type": event_type, "content": content}}
+        )

@@ -38,6 +38,10 @@ class RoutingFakeLLM:
         return self.scripts[key].pop(0)
 
 
+def tool_call(name: str, args_json: str, call_id: str = "t1") -> dict:
+    return {"id": call_id, "type": "function", "function": {"name": name, "arguments": args_json}}
+
+
 def spawn_call(call_id: str, goal: str, reply_format: str, layer: int = 2) -> dict:
 
     args = json.dumps({"goal": goal, "reply_format": reply_format, "layer": layer})
@@ -193,3 +197,39 @@ def test_agent_without_tri_layer_untouched():
     messages = [{"role": "user", "content": "hi"}]
     agent.run(messages)
     assert messages[-1]["content"] == "plain"
+
+
+def test_spawn_records_history_with_call_id():
+    tl, events, fake = make_trilayer()
+    fake.scripts = {
+        "L1": [LLMResult(content="ok")],
+        "L2:GOAL_A": [
+            LLMResult(tool_calls=[tool_call("bash", '{"command": "echo hi"}', call_id="c9")]),
+            LLMResult(content="worker reply"),
+        ],
+    }
+    tl.bound_spawn(1).fn({"goal": "GOAL_A", "reply_format": "worker reply"}, "call-xyz")
+
+    assert len(tl.subagents) == 1
+    record = next(iter(tl.subagents.values()))
+    assert record["call_id"] == "call-xyz"
+    assert record["status"] == "done"
+    kinds = [e["type"] for e in record["events"]]
+    assert "tool" in kinds and "tool_result" in kinds
+    spawn_events = [c for t, c in events if t == "agent_spawn"]
+    assert spawn_events[0]["call_id"] == "call-xyz"
+
+
+def test_parallel_spawns_record_distinct_histories():
+    tl, _events, fake = make_trilayer()
+    fake.scripts = {
+        "L1": [LLMResult(content="ok")],
+        "L2:GOAL_A": [LLMResult(content="reply A")],
+        "L2:GOAL_B": [LLMResult(content="reply B")],
+    }
+    tl.bound_spawn(1).fn({"goal": "GOAL_A", "reply_format": "reply A"}, "call-a")
+    tl.bound_spawn(1).fn({"goal": "GOAL_B", "reply_format": "reply B"}, "call-b")
+
+    assert len(tl.subagents) == 2
+    call_ids = {r["call_id"] for r in tl.subagents.values()}
+    assert call_ids == {"call-a", "call-b"}

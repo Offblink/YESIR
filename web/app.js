@@ -83,7 +83,7 @@ async function switchSession(id) {
     rawMessages = s.messages || [];
     msgs.innerHTML = '';
     tray.innerHTML = '';
-    restoreAgentBubbles(rawMessages);
+    registerArchived(s.subagents);
     let toolBlocks = {};
     for (const m of rawMessages) {
       if (m.role === 'user') addDiv('user', marked.parse(m.content || ''));
@@ -102,6 +102,7 @@ async function switchSession(id) {
           const argsHtml = args ? ' <code style="font-size:0.82rem;opacity:0.7">' + escapeHtml(args.length > 80 ? args.slice(0, 80) + '...' : args) + '</code>' : '';
           d.innerHTML = '<div class="tool-label">&#x1F527; ' + escapeHtml(tc.function?.name || 'tool') + argsHtml + '</div><div class="tool-result"></div>';
           msgs.appendChild(d);
+          if (tc.function?.name === 'spawn') makeSpawnBlockClickable(d, tc.id);
           toolBlocks[tc.id] = d;
         });
       } else if (m.role === 'tool') {
@@ -199,8 +200,12 @@ document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.ke
 document.getElementById('session-filter').addEventListener('input', renderSessionList);
 document.getElementById('btn-new-session').addEventListener('click', () => newSession());
 
-/* ---------- agent tray (floating bubbles) ---------- */
-const agents = {}; // id -> {layer, goal, replyFormat, status, eventsEl}
+/* ---------- agent tray (bubbles while running) + replayable modal ---------- */
+const agents = {};         // live spec id -> {layer, goal, replyFormat, status, history, eventsEl}
+const specByCall = {};     // live tool_call id -> spec id
+let archived = {};         // persisted spec id -> same shape as live (history = events)
+const archivedByCall = {}; // persisted tool_call id -> spec id
+
 function agentBubble(id) {
   const a = agents[id];
   const b = document.createElement('div');
@@ -217,14 +222,21 @@ function setAgentStatus(id, st) {
   if (!a) return;
   a.status = st;
   const b = document.getElementById('bubble-' + id);
-  if (b) { b.classList.remove('running', 'done', 'failed'); b.classList.add(st); }
+  if (b) {
+    b.classList.remove('running', 'done', 'failed');
+    b.classList.add(st);
+    if (st === 'done' || st === 'failed') {
+      // bubbles are transient: only visible while the subagent runs
+      setTimeout(() => { b.remove(); }, 1500);
+    }
+  }
   if (a.eventsEl) {
     const label = { done: '\u2714 finished', failed: '\u2718 failed' }[st];
     if (label) a.eventsEl.insertAdjacentHTML('beforeend', '<div class="ev final-ev">' + label + '</div>');
   }
 }
 function agentEvent(id, ev) {
-  const a = agents[id];
+  const a = agents[id] || archived[id];
   if (!a || !a.eventsEl) return;
   const body = a.eventsEl;
   if (ev.type === 'text' || ev.type === 'reasoning') {
@@ -242,19 +254,27 @@ function agentEvent(id, ev) {
     const text = String(ev.content.content || '');
     body.insertAdjacentHTML('beforeend', '<div class="ev">' + escapeHtml(text.slice(0, 400)) + (text.length > 400 ? '...' : '') + '</div>');
     body.scrollTop = body.scrollHeight;
+  } else if (ev.type === 'agent_spawn') {
+    body.insertAdjacentHTML('beforeend', '<div class="ev tool-ev">\u{1F9E9} spawn L' + (ev.content.layer || '?') + ': ' + escapeHtml((ev.content.goal || '').slice(0, 120)) + '</div>');
+    body.scrollTop = body.scrollHeight;
+  } else if (ev.type === 'agent_status') {
+    body.insertAdjacentHTML('beforeend', '<div class="ev">' + escapeHtml(ev.content.status) + '</div>');
+    body.scrollTop = body.scrollHeight;
   } else if (ev.type === 'error') {
     body.insertAdjacentHTML('beforeend', '<div class="ev err-ev">\u26A0 ' + escapeHtml(ev.content) + '</div>');
     body.scrollTop = body.scrollHeight;
   }
 }
 function openAgentModal(id) {
-  const a = agents[id];
+  const a = agents[id] || archived[id];
   if (!a) return;
   const overlay = document.getElementById('agent-modal-overlay');
   overlay.innerHTML = '<div id="agent-modal">'
-    + '<div class="agent-modal-head"><h3>' + (a.layer === 3 ? 'L3 Worker' : 'L2 Task Agent') + ' \u00B7 ' + escapeHtml(a.goal.slice(0, 60)) + '</h3>'
+    + '<div class="agent-modal-head"><h3>' + (a.layer === 3 ? 'L3 Worker' : 'L2 Task Agent') + ' \u00B7 ' + escapeHtml((a.goal || '').slice(0, 60)) + '</h3>'
     + '<button id="agent-modal-close">\u2715</button></div>'
-    + '<div class="agent-modal-taskspec"><b>Goal:</b> ' + escapeHtml(a.goal) + '<br><b>Reply format:</b> ' + escapeHtml(a.replyFormat || '(free)') + '</div>'
+    + '<div class="agent-modal-taskspec"><b>Goal:</b> ' + escapeHtml(a.goal || '')
+    + '<br><b>Reply format:</b> ' + escapeHtml(a.replyFormat || '(free)')
+    + '<br><b>Status:</b> ' + escapeHtml(a.status || 'unknown') + '</div>'
     + '<div class="agent-modal-body"></div></div>';
   const bodyEl = overlay.querySelector('.agent-modal-body');
   a.eventsEl = bodyEl;
@@ -264,20 +284,24 @@ function openAgentModal(id) {
   });
   overlay.classList.add('show');
 }
-function restoreAgentBubbles(list) {
-  for (const m of list) {
-    if (m.role !== 'assistant' || !m.tool_calls) continue;
-    for (const tc of m.tool_calls) {
-      if (tc.function?.name !== 'spawn') continue;
-      let goal = '', layer = 2;
-      try {
-        const args = JSON.parse(tc.function.arguments || '{}');
-        goal = args.goal || '(no goal)'; layer = args.layer || 2;
-      } catch (e) { goal = tc.function.arguments || '(no goal)'; }
-      agents[tc.id] = { layer, goal, replyFormat: '', status: 'done', history: [] };
-      agentBubble(tc.id);
-    }
-  }
+function makeSpawnBlockClickable(el, callId) {
+  el.classList.add('spawn-block');
+  el.title = 'Click to view subagent details';
+  el.addEventListener('click', () => {
+    const id = specByCall[callId] || archivedByCall[callId];
+    if (id) openAgentModal(id);
+  });
+}
+function registerArchived(subs) {
+  archived = {};
+  for (const k of Object.keys(archivedByCall)) delete archivedByCall[k];
+  (subs || []).forEach(r => {
+    archived[r.id] = {
+      layer: r.layer, goal: r.goal, replyFormat: r.reply_format,
+      status: r.status, history: r.events || [],
+    };
+    if (r.call_id) archivedByCall[r.call_id] = r.id;
+  });
 }
 
 /* ---------- send / stream ---------- */
@@ -344,6 +368,7 @@ async function send() {
             const argsHtml = args ? ' <code style="font-size:0.82rem;opacity:0.7">' + escapeHtml(args.length > 80 ? args.slice(0, 80) + '...' : args) + '</code>' : '';
             d.innerHTML = '<div class="tool-label">&#x1F527; ' + escapeHtml(obj.content.name) + argsHtml + '</div><div class="tool-result"></div>';
             msgs.insertBefore(d, ad);
+            if (obj.content.name === 'spawn') makeSpawnBlockClickable(d, obj.content.id);
             break;
           }
           case 'tool_result': {
@@ -370,6 +395,7 @@ async function send() {
               layer: obj.content.layer, goal: obj.content.goal,
               replyFormat: obj.content.reply_format || '', status: 'running', history: [],
             };
+            if (obj.content.call_id) specByCall[obj.content.call_id] = obj.content.id;
             agentBubble(obj.content.id);
             break;
           }

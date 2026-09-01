@@ -44,7 +44,8 @@ class BoundTool:
     """An agent-bound tool beyond the base registry (spawn, ask_user, ...)."""
 
     schema: dict
-    fn: Callable[[dict], str]
+    fn: Callable[..., str]
+    with_call_id: bool = False  # fn also receives the tool_call id
 
 
 class Agent:
@@ -87,10 +88,12 @@ class Agent:
             self.cfg.model, self.cfg.endpoint, self.cfg.api_key, messages, tool_defs, on_delta
         )
 
-    def _dispatch(self, name: str, args: dict) -> str:
+    def _dispatch(self, name: str, args: dict, call_id: str | None = None) -> str:
         bound = self.extra_tools.get(name)
         if bound is not None:
             try:
+                if bound.with_call_id:
+                    return str(bound.fn(args, call_id))
                 return str(bound.fn(args))
             except Exception as exc:
                 return f"ERROR: {exc}"
@@ -104,7 +107,7 @@ class Agent:
         except json.JSONDecodeError:
             args = {}
         self.sink.emit("tool", {"name": name, "args": raw_args, "id": tc["id"]})
-        output = self._dispatch(name, args)
+        output = self._dispatch(name, args, call_id=tc["id"])
         self.sink.emit("tool_result", {"content": _truncate(output), "id": tc["id"]})
         messages.append({"role": "tool", "tool_call_id": tc["id"], "content": output})
 
@@ -167,7 +170,7 @@ class Agent:
         outputs: list[str] = [""] * len(parsed)
 
         def worker(index: int, tc: dict, args: dict) -> None:
-            outputs[index] = self._dispatch(tc["function"]["name"], args)
+            outputs[index] = self._dispatch(tc["function"]["name"], args, call_id=tc["id"])
 
         threads = [
             threading.Thread(target=worker, args=(i, tc, args), daemon=True)
