@@ -111,6 +111,7 @@ def test_ask_user_timeout(monkeypatch):
     messages = run_orchestrator(fake, sink)
     tool_msgs = [m for m in messages if m.get("role") == "tool"]
     assert tool_msgs[0]["content"] == "ERROR: 用户未回答"
+    assert ("ping", None) in events  # heartbeat kept the stream alive
     # timed-out ask cannot be resolved anymore
     ask_content = next(c for t, c in events if t == "ask")
     assert not resolve_ask(ask_content["id"], "太晚了")

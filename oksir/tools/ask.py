@@ -5,12 +5,14 @@ until the UI answers via POST /answer (resolve_ask) or the timeout expires.
 """
 
 import threading
+import time
 import uuid
 
 from oksir.agent import BoundTool
 from oksir.events import Sink
 
 ASK_TIMEOUT_S = 300
+HEARTBEAT_S = 15
 
 ASK_SCHEMA = {
     "type": "function",
@@ -99,7 +101,17 @@ def make_ask_tool(sink: Sink) -> BoundTool:
             },
         )
         try:
-            if not entry["event"].wait(ASK_TIMEOUT_S):
+            # Heartbeat while blocked: browsers/proxies kill a fully silent
+            # response stream (~300s); pings keep the NDJSON stream alive.
+            deadline = time.monotonic() + ASK_TIMEOUT_S
+            answered = False
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or entry["event"].wait(min(HEARTBEAT_S, remaining)):
+                    answered = entry["event"].is_set()
+                    break
+                sink.emit("ping", None)
+            if not answered:
                 return "ERROR: 用户未回答"
         finally:
             with _lock:

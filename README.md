@@ -29,4 +29,16 @@ python -m oksir --web      # 浏览器 UI
 scripts\check.ps1          # ruff lint + format + pytest 一键门禁
 ```
 
+## Inquire（ask_user）
+
+仅 L1 Orchestrator 持有 `ask_user` 工具。当它需要用户拍板时：
+
+1. L1 调用 `ask_user {question, options?, allow_custom?}` → 回合挂起；
+2. Web UI 在聊天流中渲染问题卡片（选项按钮 + 可选自由输入）；
+3. 用户点选或输入 → `POST /answer {id, value}` 唤醒回合；
+4. 工具返回 `USER: <答案>`，L1 带着答案继续干活。
+
+用户 300 秒未回答则返回 `ERROR: 用户未回答`，L1 自行决定后续。终端模式下
+问题只打印不等待作答渠道，同样会在超时后继续。
+
 设计 / 规格 / 计划见 `docs/`。
