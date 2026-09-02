@@ -3,7 +3,7 @@
 > AIOS 构思的第一块实体：TriLayer Multiagent + Inquire 主动发问 + MCP 生态接入。
 > 名字来自它的工作方式：下层 agent 对上层交差时说 "Yes, sir"，需要人拍板时主动 Inquire。
 
-> 一个 AIOS 的幽灵，已经悄悄潜伏在主机里——打磨，不断地打磨，直到有一天。
+> 一个 AIOS 的幽灵，已经悄悄潜伏在 Blinvo 的主机——打磨，不断地打磨，直到有一天。
 
 ## 出发点：AIOS
 
