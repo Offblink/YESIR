@@ -2,7 +2,7 @@
 
 > 项目定位（2026-09-01 用户决策）：不再是 Psi 的新版，而是以 TriLayer + Inquire 机制为核心的独立项目，命名 YESIR。Psi（PowerShell）保留为前作。
 
-> 配套 `docs/design-trilayer.md`（已确认：A stdlib / T1 固定三层 / 允许并行 / 三层同一 model / 仅 L1 可问）。
+> 配套 `docs/design-trilayer.md`（已确认：A stdlib / T1 固定三层 / 允许并行 / 模型分层可配、缺省同一 model / 仅 L1 可问）。
 
 ## 1. 包结构
 
@@ -50,6 +50,7 @@ class Sink(Protocol):
 `text` / `newline` / `reasoning_start` / `reasoning` / `reasoning_end` / `tool` / `tool_result` / `error` / `sessionId` / `done`
 
 新增类型：
+
 | type | content | 说明 |
 |---|---|---|
 | `agent_spawn` | `{id, layer, goal, reply_format, parent_id}` | 子 agent 已创建，UI 生成浮窗 |
@@ -113,7 +114,7 @@ class TaskSpec:
 - `stream_chat(messages, tool_defs, on_delta) -> LLMResult`，`LLMResult = {content, tool_calls, reasoning}`。
 - stdlib `urllib.request` POST，逐行读 SSE（`data: ` 前缀 / `[DONE]`），兼容 DeepSeek `reasoning_content`。
 - tool_calls 按 index 增量拼接（与原 ps1 相同）。
-- 三层同一 model：`Config.model`。
+- 模型：缺省三层同一 `Config.model`；`config.json` 的 `models` 字段（键 `"1"/"2"/"3"`）按层覆盖为 `Config.layer_models`，`Config.model_for(layer)` 取值，未配置的层回落 `model`。`Agent` 构造可传 `model` 覆盖，TriLayer 按层注入。
 
 ### 2.6 Server 端点（`server.py`）
 

@@ -173,3 +173,16 @@ def test_config_round_trip_preserves_mcp_servers(tmp_path: Path) -> None:
     # Non-dict mcp_servers entries are dropped, not crash.
     path.write_text('{"mcp_servers": ["bad"], "api_key": "k"}', encoding="utf-8")
     assert load_config(path).mcp_servers == {}
+
+
+def test_config_round_trip_preserves_layer_models(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    cfg = Config(api_key="k", model="base", layer_models={1: "big", 3: "small"})
+    save_config(cfg, path)
+    loaded = load_config(path)
+    assert loaded.layer_models == {1: "big", 3: "small"}
+    assert loaded.model_for(1) == "big" and loaded.model_for(3) == "small"
+    assert loaded.model_for(2) == "base"  # layers without an entry fall back
+    # Non-layer keys and empty values are dropped, not crash.
+    path.write_text('{"models": {"9": "x", "2": ""}, "api_key": "k"}', encoding="utf-8")
+    assert load_config(path).layer_models == {}

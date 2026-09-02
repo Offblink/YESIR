@@ -82,6 +82,7 @@ class Agent:
         tool_names: frozenset[str] | set[str] | None = None,
         extra_tools: dict[str, BoundTool] | None = None,
         llm: Callable[[list[dict], list[dict]], LLMResult] | None = None,
+        model: str | None = None,  # per-agent model override; None -> cfg.model
         parallel_tools: frozenset[str] | set[str] = frozenset(),
     ) -> None:
         self.cfg = cfg
@@ -91,6 +92,7 @@ class Agent:
         self.extra_tools = extra_tools or {}
         self.parallel_tools = frozenset(parallel_tools)
         self._llm = llm
+        self.model = model
 
     @property
     def tool_defs(self) -> list[dict]:
@@ -102,7 +104,12 @@ class Agent:
         on_delta, state = wrap_reasoning_events(self.sink)
 
         result = stream_chat(
-            self.cfg.model, self.cfg.endpoint, self.cfg.api_key, messages, tool_defs, on_delta
+            self.model or self.cfg.model,
+            self.cfg.endpoint,
+            self.cfg.api_key,
+            messages,
+            tool_defs,
+            on_delta,
         )
         # Reasoning-only turns (pure tool calls) never see a text delta.
         if state["started"] and not state["ended"]:

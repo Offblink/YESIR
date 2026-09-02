@@ -2,6 +2,7 @@
 
 import json
 
+import yesir.agent as yesir_agent
 from yesir.agent import Agent
 from yesir.config import Config
 from yesir.events import FnSink
@@ -233,3 +234,29 @@ def test_parallel_spawns_record_distinct_histories():
     assert len(tl.subagents) == 2
     call_ids = {r["call_id"] for r in tl.subagents.values()}
     assert call_ids == {"call-a", "call-b"}
+
+
+def test_layer_models_route_to_stream_chat(monkeypatch):
+    """Per-layer models reach the real LLM call: L1/L3 overrides, L2 falls back."""
+
+    models_seen: list[str] = []
+
+    def scripted_stream(model, _endpoint, _api_key, messages, _tool_defs, _on_delta=None):
+        models_seen.append(model)
+        system = messages[0]["content"]
+        replied = any(m["role"] == "assistant" for m in messages)
+        # L3's prompt mentions "Task Agent", so check the Worker marker first.
+        if "basic Worker" in system:
+            return LLMResult(content="the number is 42")
+        if "Orchestrator" in system and not replied:
+            return LLMResult(tool_calls=[spawn_call("t1", "GOAL_A step", "reply A")])
+        if "Task Agent" in system and not replied:
+            return LLMResult(tool_calls=[spawn_call("t2", "GOAL_B step", "the number", layer=3)])
+        return LLMResult(content="done")
+
+    monkeypatch.setattr(yesir_agent, "stream_chat", scripted_stream)
+    cfg = Config(api_key="k", endpoint="e", model="base", layer_models={1: "big", 3: "small"})
+    tl = TriLayer(cfg, FnSink(lambda _t, _c: None))
+    orchestrator = tl.build_orchestrator(FnSink(lambda _t, _c: None))
+    orchestrator.run([{"role": "user", "content": "run the chain"}])
+    assert models_seen == ["big", "base", "small", "base", "big"]

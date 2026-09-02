@@ -183,6 +183,7 @@ class TriLayer:
             },
             parallel_tools={"spawn"},
             llm=self._llm,
+            model=self.cfg.model_for(1),
         )
 
     def _spawn(self, args: dict, parent_layer: int, call_id: str | None = None) -> str:
@@ -259,6 +260,7 @@ class TriLayer:
             ),
             parallel_tools={"spawn"},
             llm=self._llm,
+            model=self.cfg.model_for(spec.layer),
         )
         messages: list[dict] = [{"role": "user", "content": task_brief(spec)}]
         result = agent.run(messages)

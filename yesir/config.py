@@ -18,6 +18,9 @@ class Config:
     api_key: str = DEFAULT_API_KEY
     endpoint: str = DEFAULT_ENDPOINT
     model: str = DEFAULT_MODEL
+    # Per-layer model override: layer number (1/2/3) -> model name.
+    # Layers without an entry fall back to `model` (see model_for).
+    layer_models: dict[int, str] = field(default_factory=dict)
     system_prompt: str | None = None
     # MCP servers (stdio): name -> {command, args?, env?}
     mcp_servers: dict[str, dict] = field(default_factory=dict)
@@ -25,6 +28,10 @@ class Config:
     @property
     def configured(self) -> bool:
         return bool(self.api_key) and self.api_key != DEFAULT_API_KEY
+
+    def model_for(self, layer: int) -> str:
+        """Model for one TriLayer layer: per-layer override if set, else `model`."""
+        return self.layer_models.get(layer) or self.model
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -42,6 +49,11 @@ def load_config(path: Path | None = None) -> Config:
             cfg.endpoint = data["endpoint"]
         if data.get("model"):
             cfg.model = data["model"]
+        models = data.get("models")
+        if isinstance(models, dict):
+            cfg.layer_models = {
+                int(k): str(v) for k, v in models.items() if str(k) in ("1", "2", "3") and v
+            }
         if data.get("system_prompt"):
             cfg.system_prompt = data["system_prompt"]
         if isinstance(data.get("mcp_servers"), dict):
@@ -62,6 +74,8 @@ def save_config(cfg: Config, path: Path | None = None) -> None:
         "endpoint": cfg.endpoint,
         "model": cfg.model,
     }
+    if cfg.layer_models:
+        data["models"] = {str(k): cfg.layer_models[k] for k in sorted(cfg.layer_models)}
     if cfg.system_prompt:
         data["system_prompt"] = cfg.system_prompt
     if cfg.mcp_servers:

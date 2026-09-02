@@ -14,20 +14,23 @@ YESIR 的出发点不是"再写一个 coding agent"，而是一套 AIOS（AI Ope
 - 未来的 AIOS 需要 **MCP 生态**（或类似技术）的支撑；
 - **Multiagent** 不是 harness 的子范式，而是 AIOS 的核心范式之一；
 - Agent 的**主动发问机制**（需要人拍板时主动 Inquire）必须被认真对待。
+- **善用小模型**，让大模型只做真正需要它的事。
 
-YESIR 把其中三条直接做成了架构支柱：
+YESIR 把其中四条直接做成了架构支柱：
 
 | 日记里的判断 | YESIR 中的实体 |
 |---|---|
 | Multiagent 是 AIOS 的核心范式 | **TriLayer** 分层编排 |
 | Agent 需要主动发问机制 | **Inquire**（`ask_user` 问题卡片） |
 | AIOS 需要 MCP 生态 | **内置 MCP 客户端**（stdio） |
+| 善用小模型，让大模型只做真正需要它的事 | **分层模型**（`config.json` 的 `models` 字段按层覆盖） |
 
 工程血缘上，它由 [Psi](https://github.com/Offblink/Psi)（PowerShell 单文件 harness）重生而来：Psi 证明了 harness 的核心可以小到几百行；YESIR 换用 Python，把重点放在多层级编排、人机问答与工具生态上。Web UI 的视觉设计（配色、版式、模态框语言）也直接复用自 Psi 的 `agent.ps1` 内嵌前端——原版长什么样，YESIR 就长什么样。
 
 - **TriLayer**：L1 Orchestrator（唯一面向用户）→ L2 Task Agent → L3 Worker（工具受限的基础工人）。上层派发时写下 `TaskSpec{goal, reply_format}`，下层严格按契约执行、按格式交差。
 - **Inquire**：L1 通过 `ask_user` 工具主动向用户发问——选项卡片 + 自由输入，答案直接回到 agent 回合中。
 - **MCP 客户端**：内置 Model Context Protocol（stdio 传输）客户端，`config.json` 配置即可把任意 MCP server 的工具挂进 agent。
+- **分层模型**：`config.json` 的 `models` 字段可按层覆盖模型（键 `"1"/"2"/"3"`），缺省三层共用 `model`——给 L3 挂小模型即可落实"善用小模型"。
 - **失败重试**：回合失败（余额不足、断网等，报错原文全量显示）后 `Alt+R` 不加提示词、从原上下文继续。
 - **零依赖**：纯 Python 标准库；Web UI 仅从 CDN 加载 marked.js。
 
