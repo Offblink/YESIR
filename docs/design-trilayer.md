@@ -2,6 +2,17 @@
 
 > 脑暴文档 v2（Phase 3，重写版）。确认后再进入 plan/spec 与增量开发。
 
+## 出发点：AIOS
+
+本项目的动机不止是"重构 Psi"。它是一套 AIOS（AI Operating System）构思的第一
+步落地：AIOS 应是无时无处不在的伙伴而非按键激活的程序；它不替代当下 OS，而是
+补充（Let everyone accessible）；未来的 AIOS 需要 MCP 生态的支撑；Multiagent
+是 AIOS 的核心范式而非 harness 子范式；Agent 的主动发问机制必须被认真对待。
+
+对应到本文设计：TriLayer 即 Multiagent 范式的实体，ask 工具即主动发问机制的
+实体，MCP 客户端（后续实现，`mcp__<server>__<tool>` 注入 L1/L2）即 MCP 生态
+的接口。Web UI 的视觉设计直接复用 Psi `agent.ps1` 内嵌前端的设计语言。
+
 ## Problem
 
 现有 Psi 是 945 行 PowerShell 单文件 harness：OpenAI 兼容 API 客户端（SSE 流式）、8 个工具（read/write/edit/bash/glob/grep/web/web_search）、会话存储、HttpListener + 内嵌 HTML Web UI。单文件已到维护极限，且 agent 只有一条主线，无法分解任务，也没有向用户提问的通道。

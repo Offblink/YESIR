@@ -26,7 +26,8 @@ YESIR 把其中三条直接做成了架构支柱：
 
 工程血缘上，它由 [Psi](../Psi)（PowerShell 单文件 harness）重生而来：Psi 证明了
 harness 的核心可以小到几百行；YESIR 换用 Python，把重点放在多层级编排、人机
-问答与工具生态上。
+问答与工具生态上。Web UI 的视觉设计（配色、版式、模态框语言）也直接复用自 Psi
+的 `agent.ps1` 内嵌前端——原版长什么样，YESIR 就长什么样。
 
 ## 核心
 
