@@ -4,14 +4,9 @@
 
 ## 出发点：AIOS
 
-本项目的动机不止是"重构 Psi"。它是一套 AIOS（AI Operating System）构思的第一
-步落地：AIOS 应是无时无处不在的伙伴而非按键激活的程序；它不替代当下 OS，而是
-补充（Let everyone accessible）；未来的 AIOS 需要 MCP 生态的支撑；Multiagent
-是 AIOS 的核心范式而非 harness 子范式；Agent 的主动发问机制必须被认真对待。
+本项目的动机不止是"重构 Psi"。它是一套 AIOS（AI Operating System）构思的第一步落地：AIOS 应是无时无处不在的伙伴而非按键激活的程序；它不替代当下 OS，而是补充（Let everyone accessible）；未来的 AIOS 需要 MCP 生态的支撑；Multiagent 是 AIOS 的核心范式而非 harness 子范式；Agent 的主动发问机制必须被认真对待。
 
-对应到本文设计：TriLayer 即 Multiagent 范式的实体，ask 工具即主动发问机制的
-实体，MCP 客户端（后续实现，`mcp__<server>__<tool>` 注入 L1/L2）即 MCP 生态
-的接口。Web UI 的视觉设计直接复用 Psi `agent.ps1` 内嵌前端的设计语言。
+对应到本文设计：TriLayer 即 Multiagent 范式的实体，ask 工具即主动发问机制的实体，MCP 客户端（`mcp__<server>__<tool>` 命名注入 L1/L2）即 MCP 生态的接口。Web UI 的视觉设计直接复用 Psi `agent.ps1` 内嵌前端的设计语言。
 
 ## Problem
 
