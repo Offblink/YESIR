@@ -141,3 +141,21 @@ html,body{font-family:var(--font);font-size:14.5px;line-height:1.6;color:var(--t
 .ask-actions button{background:var(--accent);color:#fff;border:none;border-radius:var(--radius-xs);padding:0.55rem 1.4rem;font-weight:600;cursor:pointer}
 .ask-actions button:hover{background:var(--accent-hover)}
 .ask-a{color:var(--text);font-size:0.84rem;margin-bottom:0.6rem;padding-left:0.25rem}
+/* ---- confirm modal ---- */
+#confirm-overlay{display:none;position:fixed;inset:0;z-index:120;background:rgba(10,12,24,0.45);backdrop-filter:blur(2px);align-items:center;justify-content:center}
+#confirm-overlay.show{display:flex}
+#confirm-modal{background:var(--surface);border-radius:var(--radius);border:1px solid var(--border-light);width:360px;max-width:90vw;padding:1.5rem 1.6rem 1.3rem;box-shadow:0 12px 48px rgba(0,0,0,0.28);text-align:center;animation:confirmIn 0.28s cubic-bezier(0.16,1,0.3,1)}
+@keyframes confirmIn{from{opacity:0;transform:translateY(14px) scale(0.92)}to{opacity:1;transform:translateY(0) scale(1)}}
+.confirm-icon{width:52px;height:52px;margin:0 auto 0.8rem;border-radius:50%;background:var(--error-bg);border:1px solid var(--error-border);display:flex;align-items:center;justify-content:center;font-size:1.5rem;line-height:1}
+#confirm-title{font-size:1.02rem;font-weight:600;color:var(--text);letter-spacing:-0.01em;margin-bottom:0.35rem}
+#confirm-message{font-size:0.83rem;color:var(--text2);line-height:1.55;word-break:break-word}
+#confirm-actions{display:flex;gap:0.6rem;margin-top:1.35rem}
+#confirm-actions button{flex:1;padding:0.6rem 1rem;border-radius:var(--radius-xs);border:none;font-family:var(--font);font-weight:600;font-size:0.84rem;cursor:pointer;transition:all 0.2s}
+#confirm-cancel{background:var(--surface2);color:var(--text2);border:1px solid var(--border)}
+#confirm-cancel:hover{background:var(--bg);color:var(--text)}
+#confirm-ok{background:var(--accent);color:#fff}
+#confirm-ok:hover{background:var(--accent-hover);box-shadow:0 0 18px var(--accent-glow)}
+#confirm-ok.danger{background:#ef4444}
+#confirm-ok.danger:hover{background:#dc2626;box-shadow:0 0 18px rgba(239,68,68,0.35)}
+#confirm-ok:active,#confirm-cancel:active{transform:scale(0.96)}
+#confirm-cancel:focus-visible,#confirm-ok:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-glow)}

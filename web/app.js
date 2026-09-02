@@ -36,6 +36,44 @@ function getSessionTitle(list) {
   return t.length > 55 ? t.slice(0, 52) + '...' : t;
 }
 
+/* ---------- confirm modal ---------- */
+let _confirmState = null;
+function showConfirm(opts) {
+  const overlay = document.getElementById('confirm-overlay');
+  const ok = document.getElementById('confirm-ok');
+  document.getElementById('confirm-title').textContent = opts.title || 'Are you sure?';
+  document.getElementById('confirm-message').textContent = opts.message || '';
+  ok.textContent = opts.confirmText || 'OK';
+  document.getElementById('confirm-cancel').textContent = opts.cancelText || 'Cancel';
+  ok.classList.toggle('danger', !!opts.danger);
+  _confirmState = { onConfirm: opts.onConfirm, danger: !!opts.danger };
+  overlay.classList.add('show');
+  document.getElementById('confirm-cancel').focus();
+}
+function closeConfirm(confirmed) {
+  const overlay = document.getElementById('confirm-overlay');
+  if (!overlay.classList.contains('show')) return;
+  overlay.classList.remove('show');
+  const state = _confirmState;
+  _confirmState = null;
+  if (confirmed && state && state.onConfirm) state.onConfirm();
+}
+(function initConfirmModal() {
+  const overlay = document.getElementById('confirm-overlay');
+  document.getElementById('confirm-ok').addEventListener('click', () => closeConfirm(true));
+  document.getElementById('confirm-cancel').addEventListener('click', () => closeConfirm(false));
+  overlay.addEventListener('mousedown', e => { if (e.target === overlay) closeConfirm(false); });
+  document.addEventListener('keydown', e => {
+    if (!overlay.classList.contains('show')) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeConfirm(false); }
+    // Enter confirms non-danger prompts only; destructive actions need a real click.
+    if (e.key === 'Enter' && _confirmState && !_confirmState.danger) {
+      e.preventDefault();
+      closeConfirm(true);
+    }
+  });
+})();
+
 /* ---------- sessions ---------- */
 async function loadSessions() {
   try {
@@ -164,7 +202,13 @@ function renderSessionList() {
       + '<button class="session-row-act del" title="Delete">&#10005;</button></span>';
     row.querySelector('.session-row-act.del').addEventListener('click', e => {
       e.stopPropagation();
-      if (confirm('Delete "' + (s.title || 'Untitled') + '"?')) deleteSession(s.id);
+      showConfirm({
+        title: 'Delete session',
+        message: '"' + (s.title || 'Untitled') + '" will be permanently removed. This cannot be undone.',
+        confirmText: 'Delete',
+        danger: true,
+        onConfirm: () => deleteSession(s.id)
+      });
     });
     row.querySelector('.session-row-act:not(.del)').addEventListener('click', e => { e.stopPropagation(); startRename(row, s); });
     row.addEventListener('click', () => switchSession(s.id));
