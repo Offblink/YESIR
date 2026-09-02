@@ -1,9 +1,9 @@
 """Tests for the agent turn loop, driven by scripted (Fake) LLM completions."""
 
-from oksir.agent import Agent, BoundTool, wrap_reasoning_events
-from oksir.config import Config
-from oksir.events import FnSink
-from oksir.llm import LLMError, LLMResult
+from yesir.agent import Agent, BoundTool, wrap_reasoning_events
+from yesir.config import Config
+from yesir.events import FnSink
+from yesir.llm import LLMError, LLMResult
 
 
 class FakeLLM:

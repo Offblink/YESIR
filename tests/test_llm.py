@@ -1,6 +1,6 @@
 """Tests for LLM delta assembly (offline)."""
 
-from oksir.llm import LLMResult, _apply_delta
+from yesir.llm import LLMResult, _apply_delta
 
 
 def test_tool_call_single_complete():

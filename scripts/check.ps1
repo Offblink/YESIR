@@ -2,11 +2,11 @@
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
-ruff check --fix oksir tests
+ruff check --fix yesir tests
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-ruff format oksir tests
+ruff format yesir tests
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-ruff check oksir tests
+ruff check yesir tests
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 python -m pytest -q
 exit $LASTEXITCODE

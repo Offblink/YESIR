@@ -5,10 +5,10 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from oksir import tools
-from oksir.config import Config
-from oksir.events import EmitFn, Sink
-from oksir.llm import LLMError, LLMResult, stream_chat
+from yesir import tools
+from yesir.config import Config
+from yesir.events import EmitFn, Sink
+from yesir.llm import LLMError, LLMResult, stream_chat
 
 MAX_TOOL_ROUNDS = 25
 TRUNCATE_TOOL_RESULT = 8000
@@ -70,7 +70,7 @@ class Agent:
     """One agent conversation loop. Owns no history: the caller passes the message list.
 
     `extra_tools` (BoundTool by name) lets upper layers attach dispatch/ask
-    tools (see oksir.trilayer / oksir.tools.ask). `llm` is injectable so tests
+    tools (see yesir.trilayer / yesir.tools.ask). `llm` is injectable so tests
     can drive the loop with scripted completions.
     """
 

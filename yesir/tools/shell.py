@@ -22,7 +22,7 @@ def _truncate(text: str, limit: int = TRUNCATE_BASH) -> str:
 
 
 def tool_bash(command: str, cwd: str | None = None) -> str:
-    bat = Path(tempfile.gettempdir()) / f"oksir-{os.getpid()}-{uuid.uuid4().hex[:8]}.bat"
+    bat = Path(tempfile.gettempdir()) / f"yesir-{os.getpid()}-{uuid.uuid4().hex[:8]}.bat"
     try:
         bat.write_text(f"chcp 65001 >nul\r\n{command}\r\n", encoding="utf-8", newline="")
         proc = subprocess.run(

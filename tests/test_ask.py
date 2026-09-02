@@ -6,12 +6,12 @@ import time
 
 import pytest
 
-from oksir.config import Config
-from oksir.events import FnSink, NullSink
-from oksir.llm import LLMResult
-from oksir.tools import ask as ask_mod
-from oksir.tools.ask import ASK_SCHEMA, make_ask_tool, resolve_ask
-from oksir.trilayer import TriLayer
+from yesir.config import Config
+from yesir.events import FnSink, NullSink
+from yesir.llm import LLMResult
+from yesir.tools import ask as ask_mod
+from yesir.tools.ask import ASK_SCHEMA, make_ask_tool, resolve_ask
+from yesir.trilayer import TriLayer
 
 CFG = Config(api_key="k", endpoint="e", model="m")
 
@@ -110,7 +110,7 @@ def test_multi_question_numbered_answer():
                         "ask_user",
                         {
                             "questions": [
-                                {"question": "项目名?", "options": [{"label": "OKSIR"}]},
+                                {"question": "项目名?", "options": [{"label": "YESIR"}]},
                                 {"question": "端口?"},
                             ]
                         },
@@ -123,17 +123,17 @@ def test_multi_question_numbered_answer():
 
     def resolver() -> None:
         content = first_ask(events)
-        assert resolve_ask(content["id"], ["OKSIR", "8799"])
+        assert resolve_ask(content["id"], ["YESIR", "8799"])
 
     thread = threading.Thread(target=resolver)
     thread.start()
     messages = run_orchestrator(fake, sink)
     thread.join(5)
     tool_msgs = [m for m in messages if m.get("role") == "tool"]
-    assert tool_msgs[0]["content"] == "USER:\n1. OKSIR\n2. 8799"
+    assert tool_msgs[0]["content"] == "USER:\n1. YESIR\n2. 8799"
 
     (q1, q2) = next(c for t, c in events if t == "ask")["questions"]
-    assert q1["options"] == [{"label": "OKSIR"}]
+    assert q1["options"] == [{"label": "YESIR"}]
     assert q2["options"] == [] and q2["allow_custom"] is True
 
 

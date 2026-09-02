@@ -2,12 +2,12 @@
 
 import json
 
-from oksir.agent import Agent
-from oksir.config import Config
-from oksir.events import FnSink
-from oksir.llm import LLMResult
-from oksir.tools import L3_TOOL_NAMES
-from oksir.trilayer import MAX_SPAWNS_PER_TURN, TaskSpec, TriLayer, task_brief
+from yesir.agent import Agent
+from yesir.config import Config
+from yesir.events import FnSink
+from yesir.llm import LLMResult
+from yesir.tools import L3_TOOL_NAMES
+from yesir.trilayer import MAX_SPAWNS_PER_TURN, TaskSpec, TriLayer, task_brief
 
 CFG = Config(api_key="k", endpoint="e", model="m")
 

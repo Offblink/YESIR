@@ -1,5 +1,5 @@
 [project]
-name = "oksir"
+name = "yesir"
 version = "0.1.0"
 description = "Psi — zero-dependency coding agent harness (Python rewrite) with a TriLayer agent system"
 requires-python = ">=3.13"

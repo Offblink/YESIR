@@ -12,7 +12,7 @@
 
 - 现有代码：`agent.ps1`（config → 工具 → LLM 流式 → Process-Turn 循环 → Web 服务器，逻辑已全部读懂）；`config.json`（api_key/endpoint/model）；`sessions/*.json`。
 - 约束：config.json 与 sessions 格式保持兼容；Windows；git 已有仓库，本地提交不 push。
-- 决策（默认）：同仓库共存——新增 Python 包 `oksir/` + `pyproject.toml`，`agent.ps1` 保留为 legacy 参照。
+- 决策（默认）：同仓库共存——新增 Python 包 `yesir/` + `pyproject.toml`，`agent.ps1` 保留为 legacy 参照。
 
 ## 三大子系统设计
 
@@ -74,12 +74,12 @@ L3 Worker（最底层）
 
 实现轮廓：
 1. `pyproject.toml` + ruff 全套（isort/lint/format），一键检查脚本
-2. `oksir/config.py` / `oksir/session.py` —— 兼容现有 config.json 与 sessions
-3. `oksir/tools/` —— 8 工具移植 + `ask_user`
-4. `oksir/llm.py` —— stdlib SSE 流式客户端（DeepSeek reasoning 兼容）
-5. `oksir/agent.py` —— Agent 循环，事件回调制
-6. `oksir/trilayer.py` —— TaskSpec、spawn 工具、层级 prompt、契约校验、线程池
-7. `oksir/server.py` —— ThreadingHTTPServer：/chat NDJSON + /answer
+2. `yesir/config.py` / `yesir/session.py` —— 兼容现有 config.json 与 sessions
+3. `yesir/tools/` —— 8 工具移植 + `ask_user`
+4. `yesir/llm.py` —— stdlib SSE 流式客户端（DeepSeek reasoning 兼容）
+5. `yesir/agent.py` —— Agent 循环，事件回调制
+6. `yesir/trilayer.py` —— TaskSpec、spawn 工具、层级 prompt、契约校验、线程池
+7. `yesir/server.py` —— ThreadingHTTPServer：/chat NDJSON + /answer
 8. `web/` —— 移植原 UI + 浮窗 + 模态框 + ask 卡片
 9. git：每个可运行切片即 commit，不 push
 

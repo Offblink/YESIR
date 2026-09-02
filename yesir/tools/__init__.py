@@ -1,16 +1,16 @@
 """Tool registry: OpenAI function-calling schemas, dispatch, and per-layer whitelists.
 
 Layer rules (see docs/spec.md 2.3):
-- L1/L2: all base tools; `spawn` and `ask_user` are attached by oksir.trilayer / oksir.tools.ask.
+- L1/L2: all base tools; `spawn` and `ask_user` are attached by yesir.trilayer / yesir.tools.ask.
 - L3:   read/write/edit/glob/grep/bash only (basic worker, no web, no dispatch).
 """
 
 import inspect
 
-from oksir.tools.files import tool_edit, tool_read, tool_write
-from oksir.tools.search import tool_glob, tool_grep
-from oksir.tools.shell import tool_bash
-from oksir.tools.webtools import tool_web, tool_web_search
+from yesir.tools.files import tool_edit, tool_read, tool_write
+from yesir.tools.search import tool_glob, tool_grep
+from yesir.tools.shell import tool_bash
+from yesir.tools.webtools import tool_web, tool_web_search
 
 
 def _schema(name: str, description: str, properties: dict, required: list[str]) -> dict:

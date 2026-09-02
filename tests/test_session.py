@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from oksir import session
+from yesir import session
 
 
 @pytest.fixture(autouse=True)

@@ -1,6 +1,6 @@
-# Spec: OKSIR（TriLayer + Inquire）
+# Spec: YESIR（TriLayer + Inquire）
 
-> 项目定位（2026-09-01 用户决策）：不再是 Psi 的新版，而是以 TriLayer + Inquire 机制为核心的独立项目，命名 OKSIR。Psi（PowerShell）保留为前作。
+> 项目定位（2026-09-01 用户决策）：不再是 Psi 的新版，而是以 TriLayer + Inquire 机制为核心的独立项目，命名 YESIR。Psi（PowerShell）保留为前作。
 
 > 配套 `docs/design-trilayer.md`（已确认：A stdlib / T1 固定三层 / 允许并行 / 三层同一 model / 仅 L1 可问）。
 
@@ -8,9 +8,9 @@
 
 ```
 pyproject.toml            # 项目元数据 + ruff 配置
-oksir/
+yesir/
   __init__.py             # 版本号
-  __main__.py             # 入口：python -m oksir [query] | python -m oksir --web [port]
+  __main__.py             # 入口：python -m yesir [query] | python -m yesir --web [port]
   config.py               # Config dataclass + 加载（config.json > env）
   llm.py                  # OpenAI 兼容 SSE 流式客户端（stdlib urllib）
   events.py               # Sink 协议 + 控制台 Sink + 流式聚合

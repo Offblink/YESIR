@@ -13,12 +13,12 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from oksir import tools
-from oksir.agent import SYSTEM_PROMPT, Agent, BoundTool
-from oksir.config import Config
-from oksir.events import FnSink, Sink
-from oksir.llm import LLMResult
-from oksir.tools.ask import make_ask_tool
+from yesir import tools
+from yesir.agent import SYSTEM_PROMPT, Agent, BoundTool
+from yesir.config import Config
+from yesir.events import FnSink, Sink
+from yesir.llm import LLMResult
+from yesir.tools.ask import make_ask_tool
 
 MAX_SPAWNS_PER_TURN = 8
 JSON_RETRIES = 2

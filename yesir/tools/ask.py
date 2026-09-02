@@ -12,8 +12,8 @@ import time
 import uuid
 from collections.abc import Callable
 
-from oksir.agent import BoundTool
-from oksir.events import Sink
+from yesir.agent import BoundTool
+from yesir.events import Sink
 
 ASK_TIMEOUT_S = 300
 HEARTBEAT_S = 15

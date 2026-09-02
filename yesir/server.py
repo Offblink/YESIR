@@ -7,11 +7,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from oksir import session
-from oksir.agent import SYSTEM_PROMPT
-from oksir.config import load_config, save_config
-from oksir.tools.ask import resolve_ask
-from oksir.trilayer import TriLayer
+from yesir import session
+from yesir.agent import SYSTEM_PROMPT
+from yesir.config import load_config, save_config
+from yesir.tools.ask import resolve_ask
+from yesir.trilayer import TriLayer
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
@@ -47,7 +47,7 @@ class WebSink:
             self.closed = True
 
 
-class OkSirHandler(BaseHTTPRequestHandler):
+class YesSirHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     # ---- plumbing ---------------------------------------------------------
@@ -241,9 +241,9 @@ def run_server(port: int | None = None) -> None:
     import webbrowser  # noqa: PLC0415 (only needed to open the browser)
 
     bound = _free_port(port)
-    server = ThreadingHTTPServer(("127.0.0.1", bound), OkSirHandler)
+    server = ThreadingHTTPServer(("127.0.0.1", bound), YesSirHandler)
     url = f"http://localhost:{bound}"
-    print(f"  OKSIR web UI: {url}")
+    print(f"  YESIR web UI: {url}")
     print("  Press Ctrl+C to stop")
     webbrowser.open(url)
     try:

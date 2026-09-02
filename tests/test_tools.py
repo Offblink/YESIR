@@ -2,12 +2,12 @@
 
 import json
 
-import oksir.tools.shell as shell_mod
-from oksir.tools import BASE_TOOL_NAMES, dispatch, tool_defs
-from oksir.tools.files import tool_edit, tool_read, tool_write
-from oksir.tools.search import tool_glob, tool_grep
-from oksir.tools.shell import tool_bash
-from oksir.tools.webtools import tool_web  # noqa: F401 (exercises import wiring)
+import yesir.tools.shell as shell_mod
+from yesir.tools import BASE_TOOL_NAMES, dispatch, tool_defs
+from yesir.tools.files import tool_edit, tool_read, tool_write
+from yesir.tools.search import tool_glob, tool_grep
+from yesir.tools.shell import tool_bash
+from yesir.tools.webtools import tool_web  # noqa: F401 (exercises import wiring)
 
 
 def test_read_numbered_lines(tmp_path):

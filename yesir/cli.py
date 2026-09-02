@@ -1,8 +1,8 @@
-"""Console single-shot mode: `python -m oksir "question"`."""
+"""Console single-shot mode: `python -m yesir "question"`."""
 
-from oksir.config import load_config
-from oksir.events import ConsoleSink
-from oksir.trilayer import TriLayer
+from yesir.config import load_config
+from yesir.events import ConsoleSink
+from yesir.trilayer import TriLayer
 
 
 def run_single_shot(query: str) -> int:
