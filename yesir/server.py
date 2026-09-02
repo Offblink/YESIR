@@ -11,6 +11,7 @@ from yesir import session
 from yesir.agent import SYSTEM_PROMPT
 from yesir.config import load_config, save_config
 from yesir.tools.ask import resolve_ask
+from yesir.tools.mcp import mcp_extra_tools
 from yesir.trilayer import TriLayer
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -284,6 +285,11 @@ def run_server(port: int | None = None) -> None:
     print(f"  YESIR web UI: {url}")
     print("  Press Ctrl+C to stop")
     webbrowser.open(url)
+    mcp_tools = mcp_extra_tools(load_config().mcp_servers)
+    if mcp_tools:
+        print(f"  MCP: {len(mcp_tools)} tools loaded -> {', '.join(sorted(mcp_tools))}")
+    elif load_config().mcp_servers:
+        print("  MCP: servers configured but none loaded (see stderr)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
