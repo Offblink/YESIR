@@ -2,7 +2,7 @@
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -19,6 +19,8 @@ class Config:
     endpoint: str = DEFAULT_ENDPOINT
     model: str = DEFAULT_MODEL
     system_prompt: str | None = None
+    # MCP servers (stdio): name -> {command, args?, env?}
+    mcp_servers: dict[str, dict] = field(default_factory=dict)
 
     @property
     def configured(self) -> bool:
@@ -42,6 +44,10 @@ def load_config(path: Path | None = None) -> Config:
             cfg.model = data["model"]
         if data.get("system_prompt"):
             cfg.system_prompt = data["system_prompt"]
+        if isinstance(data.get("mcp_servers"), dict):
+            cfg.mcp_servers = {
+                str(k): v for k, v in data["mcp_servers"].items() if isinstance(v, dict)
+            }
     cfg.api_key = os.environ.get("OPENAI_API_KEY") or cfg.api_key
     cfg.endpoint = os.environ.get("OPENAI_ENDPOINT") or cfg.endpoint
     cfg.model = os.environ.get("OPENAI_MODEL") or cfg.model
@@ -58,4 +64,6 @@ def save_config(cfg: Config, path: Path | None = None) -> None:
     }
     if cfg.system_prompt:
         data["system_prompt"] = cfg.system_prompt
+    if cfg.mcp_servers:
+        data["mcp_servers"] = cfg.mcp_servers
     target.write_text(json.dumps(data, indent=4), encoding="utf-8")

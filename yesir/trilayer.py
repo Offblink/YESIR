@@ -19,6 +19,7 @@ from yesir.config import Config
 from yesir.events import FnSink, Sink
 from yesir.llm import LLMResult
 from yesir.tools.ask import make_ask_tool
+from yesir.tools.mcp import mcp_extra_tools
 
 MAX_SPAWNS_PER_TURN = 8
 JSON_RETRIES = 2
@@ -178,6 +179,7 @@ class TriLayer:
             extra_tools={
                 "spawn": self.bound_spawn(1),
                 "ask_user": make_ask_tool(sink, on_answer=self.asks.append),
+                **mcp_extra_tools(self.cfg.mcp_servers),
             },
             parallel_tools={"spawn"},
             llm=self._llm,
@@ -250,7 +252,11 @@ class TriLayer:
             child_sink,
             system_prompt=L3_SYSTEM if spec.layer == 3 else L2_SYSTEM,
             tool_names=tools.L3_TOOL_NAMES if spec.layer == 3 else tools.BASE_TOOL_NAMES,
-            extra_tools={"spawn": self.bound_spawn(spec.layer)} if spec.layer == 2 else {},
+            extra_tools=(
+                {"spawn": self.bound_spawn(spec.layer), **mcp_extra_tools(self.cfg.mcp_servers)}
+                if spec.layer == 2
+                else {}
+            ),
             parallel_tools={"spawn"},
             llm=self._llm,
         )
