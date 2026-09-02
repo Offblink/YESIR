@@ -1,19 +1,41 @@
 # YESIR
 
-> TriLayer Agent + Inquire 机制的 Python coding agent harness。
+> AIOS 构思的第一块实体：TriLayer Multiagent + Inquire 主动发问 + MCP 生态接入。
 > 名字来自它的工作方式：下层 agent 对上层交差时说 "OK, sir"，需要人拍板时主动 Inquire。
 
-由 [Psi](../Psi)（PowerShell 单文件 harness）重生而来：Psi 证明了 harness 的核心可以小到几百行；
-YESIR 换用 Python 并把重点放在**多层级 agent 编排**与**人机问答机制**上。
+> 一个 AIOS 的幽灵，已经悄悄潜伏在主机里——打磨，不断地打磨，直到有一天。
+
+## 出发点：AIOS
+
+YESIR 的出发点不是"再写一个 coding agent"，而是一套 AIOS（AI Operating System）
+构思的第一步落地。那套构思的几条核心判断：
+
+- AIOS 不该是"长按电源键激活"的东西，而应是**无时无处不在的伙伴**；
+- 它不替代当下的 OS，而是重要的补充——**Let everyone accessible**；
+- 未来的 AIOS 需要 **MCP 生态**（或类似技术）的支撑；
+- **Multiagent** 不是 harness 的子范式，而是 AIOS 的核心范式之一；
+- Agent 的**主动发问机制**（需要人拍板时主动 Inquire）必须被认真对待。
+
+YESIR 把其中三条直接做成了架构支柱：
+
+| 日记里的判断 | YESIR 中的实体 |
+|---|---|
+| Multiagent 是 AIOS 的核心范式 | **TriLayer** 分层编排 |
+| Agent 需要主动发问机制 | **Inquire**（`ask_user` 问题卡片） |
+| AIOS 需要 MCP 生态 | **内置 MCP 客户端**（stdio） |
+
+工程血缘上，它由 [Psi](../Psi)（PowerShell 单文件 harness）重生而来：Psi 证明了
+harness 的核心可以小到几百行；YESIR 换用 Python，把重点放在多层级编排、人机
+问答与工具生态上。
 
 ## 核心
 
 - **TriLayer**：L1 Orchestrator（唯一面向用户）→ L2 Task Agent → L3 Worker（工具受限的基础工人）。
   上层派发时写下 `TaskSpec{goal, reply_format}`，下层严格按契约执行、按格式交差。
 - **Inquire**：L1 通过 `ask_user` 工具主动向用户发问——选项卡片 + 自由输入，答案直接回到 agent 回合中。
-- **零依赖**：纯 Python 标准库；Web UI 仅从 CDN 加载 marked.js。
 - **MCP 客户端**：内置 Model Context Protocol（stdio 传输）客户端，`config.json` 配置即可把任意 MCP server 的工具挂进 agent。
 - **失败重试**：回合失败（余额不足、断网等，报错原文全量显示）后 `Alt+R` 不加提示词、从原上下文继续。
+- **零依赖**：纯 Python 标准库；Web UI 仅从 CDN 加载 marked.js。
 
 ## 快速开始
 
