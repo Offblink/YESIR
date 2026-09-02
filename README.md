@@ -87,4 +87,20 @@ python -m yesir --web      # 浏览器 UI
 scripts\check.ps1          # ruff lint + format + pytest 一键门禁
 ```
 
+### ruff 工具链
+
+开发流程围绕 `scripts/check.ps1` 一键门禁：`ruff check --fix`（自动修）→ `ruff format` → `ruff check`（复检）→ `pytest`。四步全过才算完成一个任务。
+
+规则配置在 `pyproject.toml`（`target-version = py313`，`line-length = 100`，排除 `web/`、`sessions/`、`docs/`），启用全套规则族：
+
+| 规则族 | 内容 |
+|---|---|
+| E / W / F / I | pycodestyle、pyflakes、isort 导入排序 |
+| N / UP | PEP 8 命名、pyupgrade 语法现代化 |
+| B / C4 / SIM | bugbear 检错、推导式简化、分支简化 |
+| RUF / PL / RET / PTH | ruff 特有规则、pylint、返回值简化、pathlib |
+| ARG | 未使用参数（约定以 `_` 前缀命名） |
+
+项目约定里最常见的触发项：`RUF001`（禁止全角标点混入代码）、`PLC0415`（禁止函数内 import，重模块确需延迟加载时加 `# noqa: PLC0415` 注释说明）、`ARG002`（未使用的参数改名 `_`）。
+
 设计 / 规格 / 计划见 `docs/`。
