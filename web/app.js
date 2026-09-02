@@ -142,7 +142,12 @@ function renderMessages(s) {
         det.innerHTML = '<summary>Thinking\u2026</summary><div style="white-space:pre-wrap;max-height:200px;overflow-y:auto">' + escapeHtml(m.reasoning) + '</div>';
         msgs.appendChild(det);
       }
-      if (m.content) addDiv('assistant', marked.parse(m.content));
+      if (m.content) {
+        const c = String(m.content);
+        if (c.startsWith('(LLM error:') || c.startsWith('(Hit max tool rounds'))
+          addDiv('error', '&#x26A0; ' + escapeHtml(c));
+        else addDiv('assistant', marked.parse(m.content));
+      }
       if (m.tool_calls) m.tool_calls.forEach(tc => {
         const d = document.createElement('div');
         d.className = 'msg tool'; d.id = 'tool-' + tc.id;
@@ -385,10 +390,30 @@ async function send() {
   turn.userText = text;
   input.value = ''; btn.disabled = true; status.textContent = 'Thinking...';
   renderTurnLive();
+  await pumpStream('/chat', { message: text, sessionId: sid });
+  if (currentSessionId === sid) input.focus();
+}
+
+/* Alt+R: rerun the failed/stopped turn with no new prompt. */
+async function retryTurn() {
+  if (processing || !currentSessionId) return;
+  processing = true;
+  abortCtrl = new AbortController();
+  const sid = currentSessionId;
+  turn = { sessionId: sid, entries: [] };
+  sessionDirty = true;
+  btn.disabled = true;
+  status.textContent = 'Retrying...';
+  renderTurnLive();
+  await pumpStream('/retry', { sessionId: sid });
+  if (currentSessionId === sid) input.focus();
+}
+
+async function pumpStream(url, body) {
   try {
-    const resp = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, sessionId: sid }), signal: abortCtrl.signal });
-    if (!resp.ok) { status.textContent = 'Error: ' + resp.status; turn = null; processing = false; btn.disabled = false; return; }
+    const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body), signal: abortCtrl.signal });
+    if (!resp.ok) { status.textContent = 'Error: ' + resp.status; turn = null; return; }
     const reader = resp.body.getReader();
     const dec = new TextDecoder();
     let leftover = '';
@@ -411,7 +436,6 @@ async function send() {
     turn = null;
   }
   processing = false; btn.disabled = false;
-  if (currentSessionId === sid) input.focus();
 }
 
 /* Turn events update the model first, then touch the DOM only when the
@@ -486,8 +510,9 @@ function handleTurnEvent(obj) {
       break;
     case 'done': {
       const viewing = currentSessionId === t.sessionId;
+      const failed = t.entries.length && t.entries[t.entries.length - 1].kind === 'error';
       turn = null;
-      status.textContent = '';
+      status.textContent = failed ? 'Turn failed. Press Alt+R to retry.' : '';
       if (viewing) reloadSessionFromServer();
       break;
     }
@@ -560,6 +585,14 @@ input.addEventListener('keydown', e => {
   if (e.key === 'Escape' && abortCtrl) { abortCtrl.abort(); abortCtrl = null; }
 });
 btn.addEventListener("click", send);
+document.addEventListener('keydown', e => {
+  if (e.altKey && (e.key === 'r' || e.key === 'R')) {
+    if (processing || !currentSessionId) return;
+    if (document.getElementById('confirm-overlay').classList.contains('show')) return;
+    e.preventDefault();
+    retryTurn();
+  }
+});
 document.getElementById('btn-browse').addEventListener('click', async () => {
   try {
     const r = await fetch('/pickfile', { method: 'POST' });

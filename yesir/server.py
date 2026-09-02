@@ -23,6 +23,26 @@ _mime = {
 }
 
 
+RETRY_STRIP_PREFIXES = ("(LLM error:", "(Hit max tool rounds")
+
+
+def sanitize_for_retry(messages: list[dict]) -> list[dict]:
+    """Drop the synthetic tail a failed turn left behind, so Alt+R continues
+    from real context: error markers, max-rounds notices, and any dangling
+    assistant tool_calls that never got results."""
+    out = list(messages)
+    while out:
+        last = out[-1]
+        if last.get("role") != "assistant":
+            break
+        content = str(last.get("content") or "")
+        if content.startswith(RETRY_STRIP_PREFIXES) or last.get("tool_calls"):
+            out.pop()
+        else:
+            break
+    return out
+
+
 class WebSink:
     """Thread-safe NDJSON writer over the /chat response stream."""
 
@@ -114,6 +134,8 @@ class YesSirHandler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/chat":
             self._handle_chat()
+        elif url.path == "/retry":
+            self._handle_retry()
         elif url.path == "/answer":
             data = self._read_body()
             value = data.get("value")
@@ -170,19 +192,36 @@ class YesSirHandler(BaseHTTPRequestHandler):
         else:
             self._send_json({"error": "not found"}, status=404)
 
-    # ---- long-running handlers --------------------------------------------
     def _handle_chat(self) -> None:
         data = self._read_body()
-        user_msg = data.get("message", "")
-        session_id = data.get("sessionId")
+        self._run_turn(data.get("sessionId"), user_msg=str(data.get("message") or ""))
 
+    def _handle_retry(self) -> None:
+        """Alt+R: rerun the last turn with no new prompt, continuing from real
+        context (synthetic error tail is stripped; see sanitize_for_retry)."""
+        data = self._read_body()
+        session_id = data.get("sessionId")
         stored = session.load_session(session_id) if session_id else None
-        if stored:
-            messages = list(stored["messages"])
-        else:
-            if not session_id:
-                session_id = session.new_session_id()
-            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        if not stored:
+            self._send_json({"error": "no session to retry"}, status=400)
+            return
+        messages = sanitize_for_retry(stored["messages"])
+        if not any(m.get("role") != "system" for m in messages):
+            self._send_json({"error": "nothing to retry"}, status=400)
+            return
+        self._run_turn(session_id, user_msg=None, messages=messages)
+
+    def _run_turn(self, session_id: str | None, user_msg: str | None, messages=None) -> None:
+        stored = session.load_session(session_id) if session_id else None
+        if messages is None:
+            if stored:
+                messages = list(stored["messages"])
+            else:
+                if not session_id:
+                    session_id = session.new_session_id()
+                messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+            if user_msg is not None:
+                messages.append({"role": "user", "content": user_msg})
 
         cfg = load_config()
         sink = WebSink(self)
@@ -193,7 +232,6 @@ class YesSirHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.close_connection = True
         try:
-            messages.append({"role": "user", "content": user_msg})
             trilayer = TriLayer(cfg, sink)
             agent = trilayer.build_orchestrator(sink)
             agent.run(messages)
