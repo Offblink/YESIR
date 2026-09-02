@@ -1,4 +1,4 @@
-/* OKSIR web UI */
+/* YESIR web UI */
 marked.setOptions({ breaks: true, gfm: true });
 const msgs = document.getElementById('messages'), input = document.getElementById('input'),
   btn = document.getElementById('send'), status = document.getElementById('status'),
@@ -499,7 +499,9 @@ function renderTurnLive() {
       msgs.appendChild(d);
       if (e.name === 'spawn') makeSpawnBlockClickable(d, e.id);
     } else if (e.kind === 'ask') {
-      msgs.appendChild(e.active ? buildActiveAskCard(e, saved) : buildAnsweredAskCard(e));
+      const card = e.active ? buildActiveAskCard(e, saved) : buildAnsweredAskCard(e);
+      card.classList.add('live-node');
+      msgs.appendChild(card);
     } else if (e.kind === 'error') {
       const d = document.createElement('div');
       d.className = 'msg error live-node';
@@ -611,7 +613,9 @@ function collectAskAnswers(card) {
   }
   const rec = (turn && turn.entries || []).find(x => x.kind === 'ask' && x.id === card._askId);
   if (rec) { rec.answers = vals; rec.active = false; }
-  card.replaceWith(buildAnsweredAskCard({ questions: qs, answers: vals, status: 'answered' }));
+  const answered = buildAnsweredAskCard({ questions: qs, answers: vals, status: 'answered' });
+  answered.classList.add('live-node');
+  card.replaceWith(answered);
   fetch('/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id: card._askId, value: vals }) }).catch(() => {});
 }
