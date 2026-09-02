@@ -23,9 +23,7 @@ YESIR 把其中三条直接做成了架构支柱：
 | Agent 需要主动发问机制 | **Inquire**（`ask_user` 问题卡片） |
 | AIOS 需要 MCP 生态 | **内置 MCP 客户端**（stdio） |
 
-工程血缘上，它由 [Psi](../Psi)（PowerShell 单文件 harness）重生而来：Psi 证明了 harness 的核心可以小到几百行；YESIR 换用 Python，把重点放在多层级编排、人机问答与工具生态上。Web UI 的视觉设计（配色、版式、模态框语言）也直接复用自 Psi 的 `agent.ps1` 内嵌前端——原版长什么样，YESIR 就长什么样。
-
-## 核心
+工程血缘上，它由 [Psi](https://github.com/Offblink/Psi)（PowerShell 单文件 harness）重生而来：Psi 证明了 harness 的核心可以小到几百行；YESIR 换用 Python，把重点放在多层级编排、人机问答与工具生态上。Web UI 的视觉设计（配色、版式、模态框语言）也直接复用自 Psi 的 `agent.ps1` 内嵌前端——原版长什么样，YESIR 就长什么样。
 
 - **TriLayer**：L1 Orchestrator（唯一面向用户）→ L2 Task Agent → L3 Worker（工具受限的基础工人）。上层派发时写下 `TaskSpec{goal, reply_format}`，下层严格按契约执行、按格式交差。
 - **Inquire**：L1 通过 `ask_user` 工具主动向用户发问——选项卡片 + 自由输入，答案直接回到 agent 回合中。
