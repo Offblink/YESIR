@@ -1,14 +1,13 @@
 # YESIR
 
 > AIOS 构思的第一块实体：TriLayer Multiagent + Inquire 主动发问 + MCP 生态接入。
-> 名字来自它的工作方式：下层 agent 对上层交差时说 "OK, sir"，需要人拍板时主动 Inquire。
+> 名字来自它的工作方式：下层 agent 对上层交差时说 "Yes, sir"，需要人拍板时主动 Inquire。
 
 > 一个 AIOS 的幽灵，已经悄悄潜伏在主机里——打磨，不断地打磨，直到有一天。
 
 ## 出发点：AIOS
 
-YESIR 的出发点不是"再写一个 coding agent"，而是一套 AIOS（AI Operating System）
-构思的第一步落地。那套构思的几条核心判断：
+YESIR 的出发点不是"再写一个 coding agent"，而是一套 AIOS（AI Operating System）构思的第一步落地。那套构思的几条核心判断：
 
 - AIOS 不该是"长按电源键激活"的东西，而应是**无时无处不在的伙伴**；
 - 它不替代当下的 OS，而是重要的补充——**Let everyone accessible**；
@@ -24,21 +23,21 @@ YESIR 把其中三条直接做成了架构支柱：
 | Agent 需要主动发问机制 | **Inquire**（`ask_user` 问题卡片） |
 | AIOS 需要 MCP 生态 | **内置 MCP 客户端**（stdio） |
 
-工程血缘上，它由 [Psi](../Psi)（PowerShell 单文件 harness）重生而来：Psi 证明了
-harness 的核心可以小到几百行；YESIR 换用 Python，把重点放在多层级编排、人机
-问答与工具生态上。Web UI 的视觉设计（配色、版式、模态框语言）也直接复用自 Psi
-的 `agent.ps1` 内嵌前端——原版长什么样，YESIR 就长什么样。
+工程血缘上，它由 [Psi](../Psi)（PowerShell 单文件 harness）重生而来：Psi 证明了 harness 的核心可以小到几百行；YESIR 换用 Python，把重点放在多层级编排、人机问答与工具生态上。Web UI 的视觉设计（配色、版式、模态框语言）也直接复用自 Psi 的 `agent.ps1` 内嵌前端——原版长什么样，YESIR 就长什么样。
 
 ## 核心
 
-- **TriLayer**：L1 Orchestrator（唯一面向用户）→ L2 Task Agent → L3 Worker（工具受限的基础工人）。
-  上层派发时写下 `TaskSpec{goal, reply_format}`，下层严格按契约执行、按格式交差。
+- **TriLayer**：L1 Orchestrator（唯一面向用户）→ L2 Task Agent → L3 Worker（工具受限的基础工人）。上层派发时写下 `TaskSpec{goal, reply_format}`，下层严格按契约执行、按格式交差。
 - **Inquire**：L1 通过 `ask_user` 工具主动向用户发问——选项卡片 + 自由输入，答案直接回到 agent 回合中。
 - **MCP 客户端**：内置 Model Context Protocol（stdio 传输）客户端，`config.json` 配置即可把任意 MCP server 的工具挂进 agent。
 - **失败重试**：回合失败（余额不足、断网等，报错原文全量显示）后 `Alt+R` 不加提示词、从原上下文继续。
 - **零依赖**：纯 Python 标准库；Web UI 仅从 CDN 加载 marked.js。
 
 ## 快速开始
+
+双击 `start.bat`：无参数 = 启动 Web UI 并自动开浏览器；`start.bat "问题"` = 终端单次问答；参数透传给 `python -m yesir`。
+
+也可以手动运行：
 
 ```powershell
 # 配置 config.json（endpoint / api_key / model），或设置 OPENAI_* 环境变量
@@ -61,12 +60,9 @@ python -m yesir --web      # 浏览器 UI
 }
 ```
 
-- 工具以 `mcp__<server>__<tool>` 命名注入，启动横幅列出已加载的清单；
-  某个 server 起不来只跳过它，不影响回合。
-- Windows 上建议用 `node <dist>/index.js` 直启而非 `npx`：子进程无法直接
-  exec `.cmd` 包装器，且免去 npx 联网。
-- 协议：JSON-RPC 2.0 over stdio，2025-06-18 `initialize` 握手；请求超时自动
-  发 `notifications/cancelled`；server 进程意外退出后下次调用自动重连。
+- 工具以 `mcp__<server>__<tool>` 命名注入，启动横幅列出已加载的清单；某个 server 起不来只跳过它，不影响回合。
+- Windows 上建议用 `node <dist>/index.js` 直启而非 `npx`：子进程无法直接 exec `.cmd` 包装器，且免去 npx 联网。
+- 协议：JSON-RPC 2.0 over stdio，2025-06-18 `initialize` 握手；请求超时自动发 `notifications/cancelled`；server 进程意外退出后下次调用自动重连。
 
 ## Web UI
 
@@ -83,8 +79,7 @@ python -m yesir --web      # 浏览器 UI
 3. 用户点选或输入 → `POST /answer {id, value}` 唤醒回合；
 4. 工具返回 `USER: <答案>`，L1 带着答案继续干活。
 
-用户 300 秒未回答则返回 `ERROR: 用户未回答`，L1 自行决定后续。终端模式下
-问题只打印不等待作答渠道，同样会在超时后继续。
+用户 300 秒未回答则返回 `ERROR: 用户未回答`，L1 自行决定后续。终端模式下问题只打印不等待作答渠道，同样会在超时后继续。
 
 ## 开发
 
