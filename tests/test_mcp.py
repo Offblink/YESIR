@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from yesir.config import Config, load_config, save_config
+from yesir.tools import mcp as mcp_mod
 from yesir.tools.mcp import (
     McpError,
     McpServer,
@@ -26,10 +27,21 @@ def fixture_server():
     server.close()
 
 
-def test_handshake_and_list_tools(server: McpServer) -> None:
+def test_handshake_and_list_tools_follows_pagination(server: McpServer) -> None:
     tools = server.list_tools()
     names = {t["name"] for t in tools}
-    assert names == {"echo", "add", "slow", "fail"}
+    # Fake serves 2 per page; client must follow nextCursor to collect all 9.
+    assert names == {
+        "echo",
+        "add",
+        "slow",
+        "fail",
+        "empty",
+        "rich",
+        "junk",
+        "rpcfail",
+        "die",
+    }
     echo = next(t for t in tools if t["name"] == "echo")
     assert echo["inputSchema"]["required"] == ["text"]
 
@@ -43,6 +55,39 @@ def test_call_tool_is_error_is_prefixed(server: McpServer) -> None:
     out = server.call_tool("fail", {})
     assert out.startswith("ERROR:")
     assert "on purpose" in out
+
+
+def test_call_tool_empty_content_fallback(server: McpServer) -> None:
+    assert server.call_tool("empty", {}) == "(no content)"
+
+
+def test_call_tool_renders_every_content_type(server: McpServer) -> None:
+    out = server.call_tool("rich", {})
+    lines = out.splitlines()
+    assert lines[0] == "see below"
+    assert "[image: image/png]" in lines
+    assert "[audio: audio/wav]" in lines
+    assert "[link: doc] file:///tmp/doc" in lines
+    assert "[resource: file:///tmp/x] hello" in lines
+    assert "[unsupported content type: widget]" in lines
+    assert "42" in lines  # non-dict item
+
+
+def test_call_tool_ignores_noise_lines(server: McpServer) -> None:
+    # Junk (non-JSON, notifications, other ids) must be skipped, not fatal.
+    assert server.call_tool("junk", {}) == "junk survived"
+
+
+def test_call_tool_jsonrpc_error_raises(server: McpServer) -> None:
+    with pytest.raises(McpError, match="rpcfail failed"):
+        server.call_tool("rpcfail", {})
+
+
+def test_call_tool_server_exits_mid_request(server: McpServer) -> None:
+    with pytest.raises(McpError, match="server exited"):
+        server.call_tool("die", {})
+    # Next use reconnects with a fresh handshake.
+    assert server.call_tool("echo", {"text": "back"}) == "echo: back"
 
 
 def test_call_tool_timeout_sends_cancellation(server: McpServer) -> None:
@@ -81,6 +126,7 @@ def test_mcp_extra_tools_builds_bound_tools() -> None:
         assert "MCP server: demo.server" in fn["description"]
         assert fn["parameters"]["required"] == ["text"]
         assert bound.fn({"text": "ping"}) == "echo: ping"
+        assert bound.fn("not a dict") == "echo: "  # non-dict args coerced
     finally:
         shutdown_servers()
 
@@ -95,8 +141,27 @@ def test_mcp_extra_tools_skips_broken_server(capsys: pytest.CaptureFixture[str])
         shutdown_servers()
 
 
+@pytest.mark.usefixtures("server")
+def test_mcp_extra_tools_non_dict_spec_and_empty_names() -> None:
+    tools = mcp_extra_tools({"bad": "not-a-dict"})
+    assert tools == {}
+
+
 def test_mcp_extra_tools_empty_when_unconfigured() -> None:
     assert mcp_extra_tools({}) == {}
+
+
+def test_server_cache_replaced_on_spec_change() -> None:
+    try:
+        s1 = mcp_mod._get_server("cache-test", SPEC)
+        s2 = mcp_mod._get_server("cache-test", SPEC)
+        assert s1 is s2  # same spec reuses the cached process
+        other = {"command": sys.executable, "args": [FAKE, "--unused"]}
+        s3 = mcp_mod._get_server("cache-test", other)
+        assert s3 is not s1 and s3.spec == other  # changed spec relaunches
+    finally:
+        shutdown_servers()
+        assert mcp_mod._servers == {}
 
 
 def test_config_round_trip_preserves_mcp_servers(tmp_path: Path) -> None:
