@@ -44,6 +44,7 @@ class _Conn:
     proc: subprocess.Popen
     lines: queue.Queue = field(default_factory=queue.Queue)
     reader: threading.Thread | None = None
+    eof: bool = False  # set by the reader thread at stdout EOF
 
 
 def _sanitize(name: str) -> str:
@@ -117,10 +118,13 @@ class McpServer:
         assert conn.proc.stdout is not None
         for line in conn.proc.stdout:
             conn.lines.put(line)
+        conn.eof = True
         conn.lines.put(None)
 
     def _ensure_started(self) -> _Conn:
-        if self._conn is not None and self._conn.proc.poll() is None:
+        # poll() alone races a just-exited child on Windows: treat observed
+        # stdout EOF as death too.
+        if self._conn is not None and self._conn.proc.poll() is None and not self._conn.eof:
             return self._conn
         conn = self._start()
         self._conn = conn
@@ -179,7 +183,11 @@ class McpServer:
         request: dict = {"jsonrpc": "2.0", "id": rid, "method": method}
         if params is not None:
             request["params"] = params
-        self._send(request)
+        try:
+            self._send(request)
+        except McpError as exc:
+            # A dead child usually surfaces as a broken write on Windows.
+            raise McpError(f"server exited during {method} (write failed: {exc})") from exc
         deadline = time.monotonic() + timeout
         while True:
             remaining = deadline - time.monotonic()
@@ -228,9 +236,16 @@ class McpServer:
         """Invoke a tool; returns its text content (prefixed 'ERROR:' on isError)."""
         with self._lock:
             self._ensure_started()
-            result = self._request(
-                "tools/call", {"name": name, "arguments": arguments}, timeout=timeout
-            )
+            try:
+                result = self._request(
+                    "tools/call", {"name": name, "arguments": arguments}, timeout=timeout
+                )
+            except McpError as exc:
+                detail = str(exc)
+                prefix = "tools/call failed:"
+                if detail.startswith(prefix):
+                    detail = f"{name} failed:{detail[len(prefix) :]}"
+                raise type(exc)(detail) from exc
             text = _content_to_text(result.get("content") or [])
             if result.get("isError"):
                 return f"ERROR: {text}" if text else "ERROR: tool reported failure"
