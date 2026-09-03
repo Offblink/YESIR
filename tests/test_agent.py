@@ -1,9 +1,10 @@
 """Tests for the agent turn loop, driven by scripted (Fake) LLM completions."""
 
+import yesir.agent as yesir_agent
 from yesir.agent import Agent, BoundTool, wrap_reasoning_events
 from yesir.config import Config
 from yesir.events import FnSink
-from yesir.llm import LLMError, LLMResult
+from yesir.llm import LLMAbortedError, LLMError, LLMResult
 
 
 class FakeLLM:
@@ -186,3 +187,52 @@ def test_wrap_reasoning_events_no_reasoning_no_events():
     on_delta("text", "x")
     assert events == [("text", "x")]
     assert state == {"started": False, "ended": False}
+
+
+def test_abort_before_round_appends_marker():
+    """Abort flag set before the loop: no LLM call, marker appended."""
+    events = []
+    sink = FnSink(lambda t, c: events.append((t, c)))
+    fake = FakeLLM([LLMResult(content="never reached")])
+    agent = Agent(Config(api_key="k"), sink, llm=fake, should_abort=lambda: True)
+    messages = [{"role": "user", "content": "hi"}]
+    agent.run(messages)
+
+    assert fake.calls == []  # no LLM round ran
+    assert ("error", "Aborted by user") in events
+    assert messages[-1] == {"role": "assistant", "content": "(Aborted)"}
+
+
+def test_abort_mid_stream_keeps_partial_reply():
+    """LLMAbortedError from the LLM layer: partial content stays, marker appended."""
+    partial = LLMResult(content="Roses are red,")
+
+    class InterruptingLLM:
+        def __call__(self, _messages, _tool_defs):
+            raise LLMAbortedError(partial)
+
+    events = []
+    sink = FnSink(lambda t, c: events.append((t, c)))
+    agent = Agent(Config(api_key="k"), sink, llm=InterruptingLLM())
+    messages = [{"role": "user", "content": "poem"}]
+    agent.run(messages)
+
+    assert ("error", "Aborted by user") in events
+    assert messages[-2] == {"role": "assistant", "content": "Roses are red,"}
+    assert messages[-1] == {"role": "assistant", "content": "(Aborted)"}
+
+
+def test_should_abort_passed_to_stream_chat(monkeypatch):
+    """Default LLM path forwards the abort predicate to stream_chat."""
+
+    def fake_stream(
+        _model, _endpoint, _api_key, _messages, _tool_defs, _on_delta=None, should_abort=None
+    ):
+        seen.append(should_abort)
+        return LLMResult(content="ok")
+
+    seen: list = []
+    monkeypatch.setattr(yesir_agent, "stream_chat", fake_stream)
+    agent = Agent(Config(api_key="k"), FnSink(lambda _t, _c: None), should_abort=lambda: False)
+    agent.run([{"role": "user", "content": "hi"}])
+    assert len(seen) == 1 and callable(seen[0])

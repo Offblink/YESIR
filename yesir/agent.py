@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from yesir import tools
 from yesir.config import Config
 from yesir.events import EmitFn, Sink
-from yesir.llm import LLMError, LLMResult, stream_chat
+from yesir.llm import LLMAbortedError, LLMError, LLMResult, stream_chat
 
 MAX_TOOL_ROUNDS = 25
 TRUNCATE_TOOL_RESULT = 8000
@@ -83,6 +83,7 @@ class Agent:
         extra_tools: dict[str, BoundTool] | None = None,
         llm: Callable[[list[dict], list[dict]], LLMResult] | None = None,
         model: str | None = None,  # per-agent model override; None -> cfg.model
+        should_abort: Callable[[], bool] | None = None,
         parallel_tools: frozenset[str] | set[str] = frozenset(),
     ) -> None:
         self.cfg = cfg
@@ -93,6 +94,7 @@ class Agent:
         self.parallel_tools = frozenset(parallel_tools)
         self._llm = llm
         self.model = model
+        self.should_abort = should_abort
 
     @property
     def tool_defs(self) -> list[dict]:
@@ -103,6 +105,8 @@ class Agent:
     def _default_llm(self, messages: list[dict], tool_defs: list[dict]) -> LLMResult:
         on_delta, state = wrap_reasoning_events(self.sink)
 
+        if self._aborted():
+            raise LLMAbortedError(LLMResult())
         result = stream_chat(
             self.model or self.cfg.model,
             self.cfg.endpoint,
@@ -110,11 +114,15 @@ class Agent:
             messages,
             tool_defs,
             on_delta,
+            should_abort=self._aborted,
         )
         # Reasoning-only turns (pure tool calls) never see a text delta.
         if state["started"] and not state["ended"]:
             self.sink.emit("reasoning_end", None)
         return result
+
+    def _aborted(self) -> bool:
+        return self.should_abort is not None and self.should_abort()
 
     def _dispatch(self, name: str, args: dict, call_id: str | None = None) -> str:
         bound = self.extra_tools.get(name)
@@ -146,9 +154,19 @@ class Agent:
 
         result = LLMResult()
         for _round in range(MAX_TOOL_ROUNDS):
+            if self._aborted():
+                self.sink.emit("error", "Aborted by user")
+                messages.append({"role": "assistant", "content": "(Aborted)"})
+                return result
             llm = self._llm if self._llm is not None else self._default_llm
             try:
                 result = llm(messages, self.tool_defs)
+            except LLMAbortedError as exc:
+                self.sink.emit("error", "Aborted by user")
+                if exc.partial.content:
+                    messages.append({"role": "assistant", "content": exc.partial.content})
+                messages.append({"role": "assistant", "content": "(Aborted)"})
+                return exc.partial
             except LLMError as exc:
                 self.sink.emit("error", str(exc))
                 messages.append({"role": "assistant", "content": f"(LLM error: {exc})"})

@@ -151,10 +151,12 @@ class TriLayer:
         cfg: Config,
         sink: Sink,
         llm: Callable[[list[dict], list[dict]], LLMResult] | None = None,
+        should_abort: Callable[[], bool] | None = None,
     ) -> None:
         self.cfg = cfg
         self.sink = sink
         self._llm = llm
+        self._should_abort = should_abort
         self._active = 0
         self._lock = threading.Lock()
         # spec_id -> {id, call_id, layer, goal, reply_format, status, events: [...]}
@@ -184,6 +186,7 @@ class TriLayer:
             parallel_tools={"spawn"},
             llm=self._llm,
             model=self.cfg.model_for(1),
+            should_abort=self._should_abort,
         )
 
     def _spawn(self, args: dict, parent_layer: int, call_id: str | None = None) -> str:
@@ -261,6 +264,7 @@ class TriLayer:
             parallel_tools={"spawn"},
             llm=self._llm,
             model=self.cfg.model_for(spec.layer),
+            should_abort=self._should_abort,
         )
         messages: list[dict] = [{"role": "user", "content": task_brief(spec)}]
         result = agent.run(messages)

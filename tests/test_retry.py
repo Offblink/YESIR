@@ -63,3 +63,22 @@ def test_does_not_mutate_input() -> None:
     msgs = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "(LLM error: x)"}]
     sanitize_for_retry(msgs)
     assert len(msgs) == 2
+
+
+def test_strips_abort_marker_keeps_partial_content() -> None:
+    """Esc-interrupted turn: marker is stripped, partial reply stays for continuation."""
+    msgs = [
+        {"role": "user", "content": "write a poem"},
+        {"role": "assistant", "content": "Roses are red,"},
+        {"role": "assistant", "content": "(Aborted)"},
+    ]
+    out = sanitize_for_retry(msgs)
+    assert out[-1] == {"role": "assistant", "content": "Roses are red,"}
+
+
+def test_strips_bare_abort_marker() -> None:
+    msgs = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "(Aborted)"},
+    ]
+    assert len(sanitize_for_retry(msgs)) == 1

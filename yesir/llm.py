@@ -26,6 +26,14 @@ class LLMError(Exception):
     """Raised for transport or non-200 responses; message is user-displayable."""
 
 
+class LLMAbortedError(Exception):
+    """Raised when the abort predicate fires mid-stream; carries the partial result."""
+
+    def __init__(self, partial: LLMResult) -> None:
+        super().__init__("Aborted by user")
+        self.partial = partial
+
+
 def _apply_delta(tool_acc: dict[int, dict], delta: dict) -> None:
     """Accumulate one streamed delta into tool_call slots, keyed by index."""
     for tc in delta.get("tool_calls") or []:
@@ -51,8 +59,10 @@ def stream_chat(
     messages: list[dict],
     tools: list[dict],
     on_delta: DeltaCallback | None = None,
+    should_abort: Callable[[], bool] | None = None,
 ) -> LLMResult:
-    """One streaming completion; raises LLMError on failure."""
+    """One streaming completion; raises LLMError on failure, LLMAbortedError
+    (carrying the partial result) when `should_abort` fires mid-stream."""
     body = json.dumps(
         {"model": model, "messages": messages, "tools": tools, "stream": True}
     ).encode("utf-8")
@@ -72,9 +82,17 @@ def stream_chat(
 
     result = LLMResult()
     tool_acc: dict[int, dict] = {}
+
+    def _aborted() -> bool:
+        return should_abort is not None and should_abort()
+
+    if _aborted():
+        raise LLMAbortedError(result)
     try:
         with resp:
             for raw_line in resp:
+                if _aborted():
+                    raise LLMAbortedError(result)
                 line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
                 if not line.startswith("data: "):
                     continue

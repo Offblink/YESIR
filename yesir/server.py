@@ -24,7 +24,7 @@ _mime = {
 }
 
 
-RETRY_STRIP_PREFIXES = ("(LLM error:", "(Hit max tool rounds")
+RETRY_STRIP_PREFIXES = ("(LLM error:", "(Hit max tool rounds", "(Aborted")
 
 
 def sanitize_for_retry(messages: list[dict]) -> list[dict]:
@@ -42,6 +42,22 @@ def sanitize_for_retry(messages: list[dict]) -> list[dict]:
         else:
             break
     return out
+
+
+# Interrupt support: one Event per running turn, keyed by session id. /stop
+# sets them; the agent checks between rounds and on every SSE line read.
+_ACTIVE_TURNS: dict[str, set[threading.Event]] = {}
+_TURNS_LOCK = threading.Lock()
+
+# One writer per session: a same-session turn started while another is still
+# finishing would otherwise overwrite its saved context (last-writer-wins).
+_SESSION_LOCKS: dict[str, threading.Lock] = {}
+_SESSION_LOCKS_GUARD = threading.Lock()
+
+
+def _session_lock(session_id: str) -> threading.Lock:
+    with _SESSION_LOCKS_GUARD:
+        return _SESSION_LOCKS.setdefault(session_id, threading.Lock())
 
 
 class WebSink:
@@ -137,6 +153,14 @@ class YesSirHandler(BaseHTTPRequestHandler):
             self._handle_chat()
         elif url.path == "/retry":
             self._handle_retry()
+        elif url.path == "/stop":
+            data = self._read_body()
+            sid = str(data.get("sessionId") or "")
+            with _TURNS_LOCK:
+                events = _ACTIVE_TURNS.pop(sid, set())
+            for event in events:
+                event.set()
+            self._send_json({"ok": bool(events)})
         elif url.path == "/answer":
             data = self._read_body()
             value = data.get("value")
@@ -224,7 +248,9 @@ class YesSirHandler(BaseHTTPRequestHandler):
             if user_msg is not None:
                 messages.append({"role": "user", "content": user_msg})
 
-        cfg = load_config()
+        abort_event = threading.Event()
+        with _TURNS_LOCK:
+            _ACTIVE_TURNS.setdefault(session_id, set()).add(abort_event)
         sink = WebSink(self)
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
@@ -233,25 +259,36 @@ class YesSirHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.close_connection = True
         try:
-            trilayer = TriLayer(cfg, sink)
-            agent = trilayer.build_orchestrator(sink)
-            agent.run(messages)
-            prior = (stored or {}).get("subagents", []) if isinstance(stored, dict) else []
-            merged = prior + list(trilayer.subagents.values())
-            prior_asks = (stored or {}).get("asks", []) if isinstance(stored, dict) else []
-            session.save_session(
-                session_id,
-                session.get_session_title(messages),
-                messages,
-                subagents=merged,
-                asks=prior_asks + list(trilayer.asks),
-            )
+            with _session_lock(session_id):
+                cfg = load_config()
+                trilayer = TriLayer(cfg, sink, should_abort=abort_event.is_set)
+                agent = trilayer.build_orchestrator(sink)
+                try:
+                    agent.run(messages)
+                finally:
+                    # Persist on every exit path (success, abort, crash): a
+                    # turn that never saves is a turn whose context is lost.
+                    prior = (stored or {}).get("subagents", []) if isinstance(stored, dict) else []
+                    prior_asks = (stored or {}).get("asks", []) if isinstance(stored, dict) else []
+                    session.save_session(
+                        session_id,
+                        session.get_session_title(messages),
+                        messages,
+                        subagents=prior + list(trilayer.subagents.values()),
+                        asks=prior_asks + list(trilayer.asks),
+                    )
             sink.emit("sessionId", session_id)
             sink.emit("done", None)
         except Exception as exc:
             sink.emit("error", str(exc))
             sink.emit("done", None)
         finally:
+            with _TURNS_LOCK:
+                events = _ACTIVE_TURNS.get(session_id)
+                if events is not None:
+                    events.discard(abort_event)
+                    if not events:
+                        _ACTIVE_TURNS.pop(session_id, None)
             self.wfile.flush()
 
     def _handle_pickfile(self) -> None:

@@ -241,7 +241,15 @@ def test_layer_models_route_to_stream_chat(monkeypatch):
 
     models_seen: list[str] = []
 
-    def scripted_stream(model, _endpoint, _api_key, messages, _tool_defs, _on_delta=None):
+    def scripted_stream(
+        model,
+        _endpoint,
+        _api_key,
+        messages,
+        _tool_defs,
+        _on_delta=None,
+        should_abort=None,  # noqa: ARG001 (fake must accept stream_chat kwarg names)
+    ):
         models_seen.append(model)
         system = messages[0]["content"]
         replied = any(m["role"] == "assistant" for m in messages)
@@ -260,3 +268,12 @@ def test_layer_models_route_to_stream_chat(monkeypatch):
     orchestrator = tl.build_orchestrator(FnSink(lambda _t, _c: None))
     orchestrator.run([{"role": "user", "content": "run the chain"}])
     assert models_seen == ["big", "base", "small", "base", "big"]
+
+
+def test_trilayer_propagates_should_abort():
+    flag = {"on": False}
+    tl = TriLayer(CFG, FnSink(lambda _t, _c: None), should_abort=lambda: flag["on"])
+    orchestrator = tl.build_orchestrator(FnSink(lambda _t, _c: None))
+    assert callable(orchestrator.should_abort) and orchestrator.should_abort() is False
+    flag["on"] = True
+    assert orchestrator.should_abort() is True

@@ -582,7 +582,12 @@ function renderTurnLive() {
 }
 input.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-  if (e.key === 'Escape' && abortCtrl) { abortCtrl.abort(); abortCtrl = null; }
+  if (e.key === 'Escape' && abortCtrl) {
+    abortCtrl.abort(); abortCtrl = null;
+    const sid = (turn && turn.sessionId) || currentSessionId;
+    if (sid) fetch('/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: sid }) }).catch(() => {});
+  }
 });
 btn.addEventListener("click", send);
 document.addEventListener('keydown', e => {
