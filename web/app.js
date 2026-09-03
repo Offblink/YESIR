@@ -172,6 +172,13 @@ function renderMessages(s) {
   if (turn && turn.sessionId === currentSessionId) renderTurnLive();
 }
 async function newSession() {
+  // Any untouched "(new session)" on disk? Focus it instead of creating
+  // another one — repeated clicks and switches must not litter the list.
+  const empty = allSessions.find(s => s.title === '(new session)' && (s.msgCount || 0) <= 1);
+  if (empty) {
+    if (empty.id !== currentSessionId) await switchSession(empty.id);
+    return;
+  }
   await closeCurrentSession();
   try {
     const r = await fetch('/new', { method: 'POST' });
@@ -369,13 +376,16 @@ function registerArchived(subs) {
 
 /* ---------- send / stream ---------- */
 let abortCtrl = null;
+let stopRequested = false; // first Esc: graceful stop via /stop; second Esc: hard disconnect
+let stopTimer = null;
 let turn = null; // active turn: {sessionId, buffer, reasoning, reasoningOpen, tools, asks, errors}
 
 async function send() {
   const text = input.value.trim();
   if (!text || processing) return;
   processing = true;
-  abortCtrl = new AbortController();
+  abortCtrl = new AbortController(); stopRequested = false;
+  if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
   if (!currentSessionId) {
     try {
       const r = await fetch('/new', { method: 'POST', signal: abortCtrl.signal });
@@ -398,7 +408,8 @@ async function send() {
 async function retryTurn() {
   if (processing || !currentSessionId) return;
   processing = true;
-  abortCtrl = new AbortController();
+  abortCtrl = new AbortController(); stopRequested = false;
+  if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
   const sid = currentSessionId;
   turn = { sessionId: sid, entries: [] };
   sessionDirty = true;
@@ -502,6 +513,7 @@ function handleTurnEvent(obj) {
       if (visible) renderTurnLive();
       break;
     case 'error':
+      if (obj.content === 'Aborted by user') t.aborted = true;
       t.entries.push({ kind: 'error', content: obj.content });
       if (visible) renderTurnLive();
       break;
@@ -511,8 +523,10 @@ function handleTurnEvent(obj) {
     case 'done': {
       const viewing = currentSessionId === t.sessionId;
       const failed = t.entries.length && t.entries[t.entries.length - 1].kind === 'error';
-      turn = null;
-      status.textContent = failed ? 'Turn failed. Press Alt+R to retry.' : '';
+      turn = null; abortCtrl = null; stopRequested = false;
+      if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
+      status.textContent = t.aborted ? 'Aborted. Press Alt+R to continue.'
+        : (failed ? 'Turn failed. Press Alt+R to retry.' : '');
       if (viewing) reloadSessionFromServer();
       break;
     }
@@ -582,11 +596,23 @@ function renderTurnLive() {
 }
 input.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-  if (e.key === 'Escape' && abortCtrl) {
-    abortCtrl.abort(); abortCtrl = null;
-    const sid = (turn && turn.sessionId) || currentSessionId;
-    if (sid) fetch('/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: sid }) }).catch(() => {});
+  if (e.key === 'Escape' && abortCtrl && turn) {
+    const sid = turn.sessionId || currentSessionId;
+    if (!stopRequested) {
+      // First Esc: ask the server to stop the turn and keep the stream open —
+      // the persisted partial reply comes back via done -> reload.
+      stopRequested = true;
+      status.textContent = 'Stopping...';
+      if (sid) fetch('/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: sid }) }).catch(() => {});
+      stopTimer = setTimeout(() => { if (abortCtrl) { abortCtrl.abort(); abortCtrl = null; } }, 15000);
+    } else {
+      // Second Esc: server is stuck (e.g. long tool call) — disconnect hard.
+      if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
+      stopRequested = false;
+      abortCtrl.abort(); abortCtrl = null;
+      status.textContent = 'Aborted.';
+    }
   }
 });
 btn.addEventListener("click", send);

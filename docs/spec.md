@@ -122,7 +122,7 @@ class TaskSpec:
 
 新增：`POST /answer` `{id, value}` → 唤醒对应 PendingAsk，200/404；`POST /stop` `{sessionId}` → 置位该会话全部运行中回合的中断 Event。
 
-中断语义（Esc 停止）：`should_abort` 在每轮 LLM 调用前与 SSE 每行读取时检查；触发时抛 `LLMAbortedError`（携带已生成部分），agent 追加部分回复 + `(Aborted)` 标记消息，`_run_turn` 在 finally 中保存（成功/中断/崩溃都落盘）。`sanitize_for_retry` 剥 `(Aborted)` 标记、保留部分回复，Alt+R 可从中断处续跑。同会话回合以 `_session_lock` 串行化，杜绝并发覆盖。
+中断语义（Esc 停止）：`should_abort` 在每轮 LLM 调用前与 SSE 每行读取时检查；触发时抛 `LLMAbortedError`（携带已生成部分），agent 追加部分回复 + `(Aborted)` 标记消息，`_run_turn` 在 finally 中保存（成功/中断/崩溃都落盘）。前端两段式：首次 Esc 发 `/stop` 并保持流打开，done 后重载会话把落盘的部分回复渲染回聊天流；再次 Esc 强制断开（服务端卡在长工具调用时的逃生门）。`sanitize_for_retry` 剥 `(Aborted)` 标记、保留部分回复，Alt+R 可从中断处续跑。同会话回合以 `_session_lock` 串行化，杜绝并发覆盖。
 
 静态文件从 `web/` 目录读取（不再内嵌字符串）。
 
